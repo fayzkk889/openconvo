@@ -6,6 +6,8 @@ import { DeploymentConfig } from '@/types/deployment';
 const DEFAULT_CONFIG: DeploymentConfig = {
   hostedFreeModeAvailable: false,
   hostedFreeDailyLimit: 20,
+  hostedSearchAvailable: false,
+  hostedSearchDailyLimit: 5,
 };
 
 export function useDeploymentConfig() {

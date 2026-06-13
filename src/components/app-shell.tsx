@@ -314,6 +314,8 @@ export function AppShell() {
             promptSnippets={settings.promptSnippets}
             accessMode={accessMode}
             hostedFreeDailyLimit={deploymentConfig.hostedFreeDailyLimit}
+            hostedSearchAvailable={deploymentConfig.hostedSearchAvailable}
+            hostedSearchDailyLimit={deploymentConfig.hostedSearchDailyLimit}
           />
         </main>
 

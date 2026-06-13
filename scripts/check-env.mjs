@@ -50,6 +50,13 @@ if (hasValue('OPENCONVO_HOSTED_FREE_DAILY_LIMIT')) {
   }
 }
 
+if (hasValue('OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT')) {
+  const limit = Number(process.env.OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT);
+  if (!Number.isFinite(limit) || limit <= 0) {
+    failures.push('OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT must be a positive number.');
+  }
+}
+
 if (hasValue('NEXT_PUBLIC_GITHUB_URL') && !validUrl(process.env.NEXT_PUBLIC_GITHUB_URL)) {
   failures.push('NEXT_PUBLIC_GITHUB_URL must be a valid https URL.');
 }

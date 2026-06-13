@@ -34,7 +34,7 @@ export default function SecurityPage() {
             <ServerCog className="h-5 w-5" />
             <h2 className="mt-4 text-lg font-semibold">Hosted limits</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">
-              Hosted free mode uses a daily shared quota. The built-in limiter is in-memory and best for early launches; production-scale deployments should add persistent edge rate limiting.
+              Hosted free chat and hosted search use daily shared quotas. The built-in limiters are in-memory and best for early launches; production-scale deployments should add persistent edge rate limiting.
             </p>
           </section>
 

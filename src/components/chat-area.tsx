@@ -42,6 +42,8 @@ interface ChatAreaProps {
   promptSnippets: PromptSnippet[];
   accessMode: ChatAccessMode;
   hostedFreeDailyLimit: number;
+  hostedSearchAvailable: boolean;
+  hostedSearchDailyLimit: number;
 }
 
 export function ChatArea({
@@ -71,6 +73,8 @@ export function ChatArea({
   promptSnippets,
   accessMode,
   hostedFreeDailyLimit,
+  hostedSearchAvailable,
+  hostedSearchDailyLimit,
 }: ChatAreaProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -247,6 +251,8 @@ export function ChatArea({
             promptSnippets={promptSnippets}
             accessMode={accessMode}
             hostedFreeDailyLimit={hostedFreeDailyLimit}
+            hostedSearchAvailable={hostedSearchAvailable && !hasTavilyKey}
+            hostedSearchDailyLimit={hostedSearchDailyLimit}
           />
         </div>
       </div>

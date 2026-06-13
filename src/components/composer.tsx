@@ -37,6 +37,8 @@ interface ComposerProps {
   promptSnippets: PromptSnippet[];
   accessMode: ChatAccessMode;
   hostedFreeDailyLimit: number;
+  hostedSearchAvailable: boolean;
+  hostedSearchDailyLimit: number;
 }
 
 export function Composer({
@@ -55,6 +57,8 @@ export function Composer({
   promptSnippets,
   accessMode,
   hostedFreeDailyLimit,
+  hostedSearchAvailable,
+  hostedSearchDailyLimit,
 }: ComposerProps) {
   const [content, setContent] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -113,10 +117,16 @@ export function Composer({
     <div className="w-full">
       <div className="mx-auto max-w-3xl rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3 shadow-2xl shadow-black/20 transition-all focus-within:border-[var(--color-border-light)]">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--color-text-tertiary)]">
-          <span>
+          <span className="min-w-0">
             {accessMode === 'byok' && 'Using your OpenRouter key'}
             {accessMode === 'hosted-free' && `Hosted free mode: ${hostedFreeDailyLimit} messages/day`}
             {accessMode === 'missing-key' && 'Add an OpenRouter key in Settings to chat'}
+            {hostedSearchAvailable && (
+              <>
+                {' '}
+                Search trial: {hostedSearchDailyLimit}/day
+              </>
+            )}
           </span>
           {accessMode === 'hosted-free' && (
             <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">

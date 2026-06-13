@@ -14,6 +14,7 @@ function check(name, condition) {
 const models = read('src/lib/models.ts');
 const openrouter = read('src/lib/openrouter.ts');
 const chatRoute = read('src/app/api/chat/route.ts');
+const searchRoute = read('src/app/api/search/route.ts');
 const db = read('src/lib/db.ts');
 const exportLib = read('src/lib/export.ts');
 const markdown = read('src/lib/markdown.tsx');
@@ -49,6 +50,8 @@ check('dynamic model fetch requires :free ids', /id\.endsWith\(':free'\)/.test(o
 check('chat route rejects non-free model ids', /isFreeModelId\(model\)/.test(chatRoute));
 check('hosted quota commits after provider acceptance', /commitHostedQuota\(hostedQuota\)/.test(chatRoute) && /getHostedQuotaStatus/.test(chatRoute));
 check('hosted quota response omits internal identity', /publicHostedUsage/.test(chatRoute) && /Omit<HostedQuota, 'identity'>/.test(chatRoute));
+check('hosted search quota commits after Tavily success', /commitHostedSearchQuota\(hostedQuota\)/.test(searchRoute) && /getHostedSearchQuotaStatus/.test(searchRoute));
+check('hosted search quota has response headers', /X-OpenConvo-Search-Limit/.test(searchRoute) && /X-OpenConvo-Search-Remaining/.test(searchRoute));
 check('database migration repairs artifact indexes', /artifactStore\.indexNames\.contains\('by-project'\)/.test(db));
 check('imports repair unsafe model ids', /resolveSafeModelId/.test(exportLib));
 check('imports cap large text fields', /MAX_MESSAGE_CHARS/.test(exportLib) && /MAX_ARTIFACT_CHARS/.test(exportLib));
@@ -65,6 +68,7 @@ check('test script is wired', packageJson.scripts?.test === 'node scripts/launch
 check('.env.example documents OpenRouter', /OPENROUTER_API_KEY/.test(envExample));
 check('.env.example documents Tavily', /TAVILY_API_KEY/.test(envExample));
 check('.env.example documents hosted free limit', /OPENCONVO_HOSTED_FREE_DAILY_LIMIT/.test(envExample));
+check('.env.example documents hosted search limit', /OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT/.test(envExample));
 check('.env.example documents GitHub URL', /NEXT_PUBLIC_GITHUB_URL/.test(envExample));
 check('README has setup instructions', /npm install/.test(readme) && /npm run dev/.test(readme));
 check('README has deploy button', /Deploy with Vercel/.test(readme));

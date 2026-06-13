@@ -16,6 +16,7 @@ Set these in your deployment provider:
 OPENROUTER_API_KEY=sk-or-v1-your-key
 OPENCONVO_HOSTED_FREE_DAILY_LIMIT=20
 TAVILY_API_KEY=tvly-your-key
+OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT=5
 NEXT_PUBLIC_GITHUB_URL=https://github.com/fayzkk889/openconvo
 ```
 
@@ -27,6 +28,7 @@ Optional:
 
 - `OPENCONVO_HOSTED_FREE_DAILY_LIMIT` controls shared hosted messages per visitor per day. Default is `20`.
 - `TAVILY_API_KEY` enables hosted web search. Users can still bring their own Tavily key in Settings.
+- `OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT` controls shared hosted searches per visitor per day. Default is `5`.
 - `NEXT_PUBLIC_GITHUB_URL` controls the landing page GitHub link.
 
 ## Vercel Steps
@@ -69,4 +71,4 @@ After deployment:
 
 ## Current Limitation
 
-Hosted free mode uses an in-memory daily quota. That is acceptable for an early launch, but serverless deployments can reset memory between instances. For serious traffic, move rate limiting to a persistent service such as Upstash Redis or Vercel KV.
+Hosted free chat and hosted search use in-memory daily quotas. That is acceptable for an early launch, but serverless deployments can reset memory between instances. For serious traffic, move rate limiting to a persistent service such as Upstash Redis or Vercel KV.

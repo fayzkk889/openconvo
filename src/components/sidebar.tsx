@@ -599,7 +599,7 @@ export function Sidebar({
             onClick={onClose}
           />
           {/* Sidebar */}
-          <div className="relative z-10 h-full w-[320px] max-w-[86vw] animate-in slide-in-from-left duration-200">
+          <div className="relative z-10 h-full w-[min(360px,92vw)] animate-in slide-in-from-left duration-200">
             {sidebarContent}
           </div>
         </div>

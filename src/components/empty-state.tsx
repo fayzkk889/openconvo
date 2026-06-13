@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { ArrowRight, Brain, CheckCircle2, FileText, Globe, Key, Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -47,11 +48,17 @@ export function EmptyState({
     <div className="flex h-full w-full items-start justify-center overflow-y-auto px-4 py-4 sm:px-5 sm:py-6 md:px-8 lg:px-10">
       <div className="empty-state-shell w-full max-w-4xl">
         <div className="mx-auto flex max-w-2xl flex-col items-center text-center">
-          <img
-            src="/logo-transparent.png"
-            alt="OpenConvo"
-            className="logo-image empty-state-logo mb-3 h-auto w-36 object-contain opacity-95 sm:w-44 md:w-52"
-          />
+          <Link
+            href="/"
+            className="empty-logo-link mb-3 inline-flex rounded-md transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+            aria-label="Go to OpenConvo homepage"
+          >
+            <img
+              src="/logo-transparent.png"
+              alt="OpenConvo"
+              className="logo-image empty-state-logo h-auto w-36 object-contain opacity-95 sm:w-44 md:w-52"
+            />
+          </Link>
 
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)]">
             <Sparkles className="h-3.5 w-3.5 text-[var(--color-text-primary)]" />
@@ -61,7 +68,7 @@ export function EmptyState({
           <h1 className="max-w-2xl text-balance text-2xl font-semibold leading-tight text-[var(--color-text-primary)] sm:text-3xl lg:text-4xl">
             Start a focused conversation.
           </h1>
-          <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--color-text-secondary)] sm:text-base">
+          <p className="empty-subtitle mt-3 max-w-xl text-sm leading-6 text-[var(--color-text-secondary)] sm:text-base">
             A clean place for model switching, grounded answers, and file-aware chats.
           </p>
 
@@ -78,7 +85,7 @@ export function EmptyState({
         {showSetupCard && (
           <div className="empty-setup-card mx-auto mt-5 max-w-2xl rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3 text-left shadow-sm sm:mt-6 sm:p-4">
             <div className="flex items-start gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)]">
+              <div className="empty-setup-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)]">
                 <Key className="h-[18px] w-[18px]" />
               </div>
               <div className="min-w-0 flex-1">
@@ -87,7 +94,7 @@ export function EmptyState({
                     <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">
                       Local setup
                     </h2>
-                    <p className="mt-1 text-sm leading-6 text-[var(--color-text-secondary)]">
+                    <p className="empty-setup-copy mt-1 text-sm leading-6 text-[var(--color-text-secondary)]">
                       {accessMode === 'hosted-free'
                         ? `No account is required. This hosted instance includes shared free capacity: ${hostedFreeDailyLimit} messages per day.`
                         : 'No account is required. Add your own free API keys locally, or use server environment keys if this instance already has them.'}

@@ -226,7 +226,7 @@ export function AppShell() {
     <TooltipProvider>
       <div className="flex h-dvh w-full overflow-hidden bg-[var(--color-bg-primary)]">
         {/* Mobile Header */}
-        <div className="md:hidden fixed top-0 left-0 right-0 h-14 bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)] z-20 flex items-center px-4 shadow-sm">
+        <div className="md:hidden fixed top-0 left-0 right-0 h-14 bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)] z-20 flex items-center px-3 shadow-sm">
           <button
             onClick={() => setSidebarOpen(true)}
             className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors p-2 -ml-2"
@@ -236,7 +236,7 @@ export function AppShell() {
           </button>
           <Link
             href="/"
-            className="flex flex-1 items-center justify-center gap-2 rounded-md font-semibold text-[var(--color-text-primary)] transition-opacity hover:opacity-85"
+            className="mobile-home-link flex h-10 flex-1 items-center justify-center gap-2 rounded-md px-3 font-semibold text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
             aria-label="Go to OpenConvo homepage"
           >
             <img src="/mark-transparent.png" alt="" className="logo-image h-6 w-6 object-contain" />

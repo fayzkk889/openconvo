@@ -310,8 +310,48 @@ body {
 }
 
 @media (max-width: 640px) {
+  .empty-state-shell {
+    max-width: 30rem;
+    padding-bottom: 1rem;
+  }
+
+  .empty-logo-link {
+    display: none;
+  }
+
   .empty-state-logo {
     width: 8.5rem;
     max-height: 5rem;
+  }
+
+  .empty-subtitle {
+    max-width: 20rem;
+  }
+
+  .empty-setup-card {
+    border-radius: 0.75rem;
+  }
+
+  .empty-setup-icon {
+    display: none;
+  }
+
+  .empty-setup-copy {
+    font-size: 0.8125rem;
+    line-height: 1.45rem;
+  }
+
+  .empty-features {
+    display: none;
+  }
+}
+
+@media (max-width: 380px) {
+  .mobile-home-link {
+    font-size: 0.875rem;
+  }
+
+  .empty-setup-card {
+    padding: 0.75rem;
   }
 }

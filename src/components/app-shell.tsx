@@ -275,7 +275,7 @@ export function AppShell() {
         />
 
         {/* Main Content */}
-        <main className="flex-1 relative flex flex-col h-full md:h-dvh pt-14 md:pt-0">
+        <main className="app-main min-w-0 flex-1 relative flex flex-col h-full md:h-dvh pt-14 md:pt-0">
           <ChatArea
             conversationId={activeId}
             conversation={activeConversation}

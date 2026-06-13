@@ -45,9 +45,9 @@ export function EmptyState({
   hostedFreeDailyLimit,
 }: EmptyStateProps) {
   return (
-    <div className="flex h-full w-full items-start justify-center overflow-y-auto px-4 py-4 sm:px-5 sm:py-6 md:px-8 lg:px-10">
-      <div className="empty-state-shell w-full max-w-4xl">
-        <div className="mx-auto flex max-w-2xl flex-col items-center text-center">
+    <div className="flex h-full w-full min-w-0 items-start justify-center overflow-y-auto overflow-x-hidden px-4 py-4 sm:px-5 sm:py-6 md:px-8 lg:px-10">
+      <div className="empty-state-shell w-full min-w-0 max-w-4xl">
+        <div className="mx-auto flex w-full min-w-0 max-w-2xl flex-col items-center text-center">
           <Link
             href="/"
             className="empty-logo-link mb-3 inline-flex rounded-md transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
@@ -65,7 +65,7 @@ export function EmptyState({
             Local-first AI workspace
           </div>
 
-          <h1 className="max-w-2xl text-balance text-2xl font-semibold leading-tight text-[var(--color-text-primary)] sm:text-3xl lg:text-4xl">
+          <h1 className="empty-title w-full max-w-2xl text-balance text-2xl font-semibold leading-tight text-[var(--color-text-primary)] sm:text-3xl lg:text-4xl">
             Start a focused conversation.
           </h1>
           <p className="empty-subtitle mt-3 max-w-xl text-sm leading-6 text-[var(--color-text-secondary)] sm:text-base">
@@ -83,18 +83,18 @@ export function EmptyState({
         </div>
 
         {showSetupCard && (
-          <div className="empty-setup-card mx-auto mt-5 max-w-2xl rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3 text-left shadow-sm sm:mt-6 sm:p-4">
+          <div className="empty-setup-card mx-auto mt-5 w-full max-w-2xl rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3 text-left shadow-sm sm:mt-6 sm:p-4">
             <div className="flex items-start gap-3">
               <div className="empty-setup-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)]">
                 <Key className="h-[18px] w-[18px]" />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
+                  <div className="min-w-0">
                     <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">
                       Local setup
                     </h2>
-                    <p className="empty-setup-copy mt-1 text-sm leading-6 text-[var(--color-text-secondary)]">
+                    <p className="empty-setup-copy mt-1 max-w-full text-wrap text-sm leading-6 text-[var(--color-text-secondary)]">
                       {accessMode === 'hosted-free'
                         ? `No account is required. This hosted instance includes shared free capacity: ${hostedFreeDailyLimit} messages per day.`
                         : 'No account is required. Add your own free API keys locally, or use server environment keys if this instance already has them.'}
@@ -109,16 +109,20 @@ export function EmptyState({
                   </button>
                 </div>
 
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <div className="flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+                <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-2">
+                  <div className="flex min-w-0 items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
                     <CheckCircle2 className={accessMode !== 'missing-key' ? 'h-4 w-4 text-[var(--color-accent)]' : 'h-4 w-4 text-[var(--color-text-tertiary)]'} />
-                    {accessMode === 'byok' && 'OpenRouter key saved'}
-                    {accessMode === 'hosted-free' && 'Hosted free mode ready'}
-                    {accessMode === 'missing-key' && 'OpenRouter key needed for chat'}
+                    <span className="min-w-0 truncate">
+                      {accessMode === 'byok' && 'OpenRouter key saved'}
+                      {accessMode === 'hosted-free' && 'Hosted free mode ready'}
+                      {accessMode === 'missing-key' && 'OpenRouter key needed for chat'}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+                  <div className="flex min-w-0 items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
                     <CheckCircle2 className={hasTavilyKey ? 'h-4 w-4 text-[var(--color-accent)]' : 'h-4 w-4 text-[var(--color-text-tertiary)]'} />
-                    Tavily key {hasTavilyKey ? 'saved' : 'for search'}
+                    <span className="min-w-0 truncate">
+                      Tavily key {hasTavilyKey ? 'saved' : 'for search'}
+                    </span>
                   </div>
                 </div>
 

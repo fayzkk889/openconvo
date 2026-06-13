@@ -288,6 +288,24 @@ body {
   border-color: var(--color-border-light);
 }
 
+.desktop-collapse-button {
+  display: none;
+}
+
+.mobile-sidebar-close-button {
+  display: inline-flex;
+}
+
+@media (min-width: 768px) {
+  .desktop-collapse-button {
+    display: inline-flex;
+  }
+
+  .mobile-sidebar-close-button {
+    display: none;
+  }
+}
+
 @media (max-height: 760px) {
   .empty-state-shell {
     padding-bottom: 1rem;
@@ -310,8 +328,16 @@ body {
 }
 
 @media (max-width: 640px) {
+  .app-main {
+    flex: 0 0 100vw;
+    width: 100vw;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
   .empty-state-shell {
-    max-width: 30rem;
+    width: 100%;
+    max-width: calc(100vw - 2rem);
     padding-bottom: 1rem;
   }
 
@@ -325,11 +351,19 @@ body {
   }
 
   .empty-subtitle {
-    max-width: 20rem;
+    width: 100%;
+    max-width: min(20rem, calc(100vw - 2rem));
   }
 
   .empty-setup-card {
+    width: 100%;
+    max-width: min(21rem, calc(100vw - 2rem));
     border-radius: 0.75rem;
+  }
+
+  .empty-title {
+    max-width: min(21rem, calc(100vw - 2rem));
+    overflow-wrap: anywhere;
   }
 
   .empty-setup-icon {
@@ -337,8 +371,10 @@ body {
   }
 
   .empty-setup-copy {
+    max-width: min(18rem, calc(100vw - 4rem));
     font-size: 0.8125rem;
     line-height: 1.45rem;
+    overflow-wrap: anywhere;
   }
 
   .empty-features {

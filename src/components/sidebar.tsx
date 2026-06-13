@@ -203,7 +203,7 @@ export function Sidebar({
             size="sm"
             icon
             onClick={onToggleCollapse}
-            className="hidden md:inline-flex"
+            className="desktop-collapse-button"
             aria-label="Collapse sidebar"
           >
             <PanelLeftClose className="h-4 w-4" />
@@ -223,7 +223,7 @@ export function Sidebar({
             size="sm"
             icon
             onClick={onClose}
-            className="md:hidden"
+            className="mobile-sidebar-close-button"
             aria-label="Close sidebar"
           >
             <X className="h-4 w-4" />

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import Link from 'next/link';
 import {
   Plus,
   Search,
@@ -184,14 +185,18 @@ export function Sidebar({
     >
       {/* Header */}
       <div className="flex h-16 items-center justify-between border-b border-[var(--color-border)] px-4">
-        <div className="flex min-w-0 items-center gap-3">
+        <Link
+          href="/"
+          className="flex min-w-0 items-center gap-3 rounded-md outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+          aria-label="Go to OpenConvo homepage"
+        >
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-bg-tertiary)] ring-1 ring-[var(--color-border)]">
             <img src="/mark-transparent.png" alt="Logo" className="logo-image h-7 w-7 object-contain" />
           </div>
           <span className="truncate text-sm font-semibold tracking-tight text-[var(--color-text-primary)]">
             OpenConvo
           </span>
-        </div>
+        </Link>
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
@@ -532,9 +537,13 @@ export function Sidebar({
 
   const collapsedContent = (
     <div className="flex h-full w-full flex-col items-center border-r border-[var(--color-border)] bg-[var(--color-bg-secondary)] py-3">
-      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-bg-tertiary)] ring-1 ring-[var(--color-border)]">
+      <Link
+        href="/"
+        className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-bg-tertiary)] ring-1 ring-[var(--color-border)] transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        aria-label="Go to OpenConvo homepage"
+      >
         <img src="/mark-transparent.png" alt="" className="logo-image h-7 w-7 object-contain" />
-      </div>
+      </Link>
 
       <div className="flex flex-col gap-1">
         <Button

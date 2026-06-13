@@ -287,3 +287,31 @@ body {
 .glow-border:hover {
   border-color: var(--color-border-light);
 }
+
+@media (max-height: 760px) {
+  .empty-state-shell {
+    padding-bottom: 1rem;
+  }
+
+  .empty-state-logo {
+    width: 10rem;
+    max-height: 5.75rem;
+  }
+
+  .empty-features {
+    display: none;
+  }
+}
+
+@media (max-height: 640px) {
+  .empty-setup-card {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .empty-state-logo {
+    width: 8.5rem;
+    max-height: 5rem;
+  }
+}

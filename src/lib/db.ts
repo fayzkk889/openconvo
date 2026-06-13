@@ -53,6 +53,14 @@ export function getDB(): Promise<IDBPDatabase<OpenConvoDB>> {
           const artifactStore = db.createObjectStore('artifacts', { keyPath: 'id' });
           artifactStore.createIndex('by-conversation', 'conversationId');
           artifactStore.createIndex('by-project', 'projectId');
+        } else {
+          const artifactStore = transaction.objectStore('artifacts');
+          if (!artifactStore.indexNames.contains('by-conversation')) {
+            artifactStore.createIndex('by-conversation', 'conversationId');
+          }
+          if (!artifactStore.indexNames.contains('by-project')) {
+            artifactStore.createIndex('by-project', 'projectId');
+          }
         }
       },
     });

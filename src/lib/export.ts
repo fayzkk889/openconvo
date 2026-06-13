@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS, ExportedSettings, Settings } from '@/types/settings';
 import { resolveSafeModelId } from '@/lib/models';
 
 const MAX_IMPORT_ITEMS = 10000;
+const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
 const MAX_TITLE_CHARS = 200;
 const MAX_MESSAGE_CHARS = 50000;
 const MAX_ARTIFACT_CHARS = 250000;
@@ -24,6 +25,9 @@ export async function downloadExport(settings?: Settings): Promise<void> {
 }
 
 export async function importFromFile(file: File): Promise<ExportedSettings | undefined> {
+  if (file.size > MAX_IMPORT_BYTES) {
+    throw new Error('Import file is too large');
+  }
   const text = await file.text();
   const data = JSON.parse(text) as unknown;
   const validated = validateImportData(data);

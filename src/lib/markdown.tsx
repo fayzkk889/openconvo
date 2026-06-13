@@ -5,6 +5,7 @@ import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { Check, Copy } from 'lucide-react';
+import { safeExternalUrl } from '@/lib/utils';
 
 function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
   const match = /language-(\w+)/.exec(className || '');
@@ -14,10 +15,14 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
 
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(codeString);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(codeString);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
   }, [codeString]);
 
   if (isInline) {
@@ -44,9 +49,11 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
 
 const markdownComponents: Components = {
   code: CodeBlock as Components['code'],
-  a: ({ href, children, ...props }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
-  ),
+  a: ({ href, children, ...props }) => {
+    const safeHref = safeExternalUrl(href);
+    if (!safeHref) return <span {...props}>{children}</span>;
+    return <a href={safeHref} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>;
+  },
 };
 
 export function MarkdownRenderer({ content }: { content: string }) {

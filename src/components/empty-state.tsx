@@ -44,21 +44,21 @@ export function EmptyState({
   hostedFreeDailyLimit,
 }: EmptyStateProps) {
   return (
-    <div className="flex h-full w-full items-start justify-center overflow-y-auto px-5 py-8 md:items-center md:px-10">
-      <div className="w-full max-w-4xl">
+    <div className="flex h-full w-full items-start justify-center overflow-y-auto px-4 py-4 sm:px-5 sm:py-6 md:px-8 lg:px-10">
+      <div className="empty-state-shell w-full max-w-4xl">
         <div className="mx-auto flex max-w-2xl flex-col items-center text-center">
           <img
             src="/logo-transparent.png"
             alt="OpenConvo"
-            className="logo-image mb-4 h-auto w-40 object-contain opacity-95 sm:w-48 md:w-60"
+            className="logo-image empty-state-logo mb-3 h-auto w-36 object-contain opacity-95 sm:w-44 md:w-52"
           />
 
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)]">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)]">
             <Sparkles className="h-3.5 w-3.5 text-[var(--color-text-primary)]" />
             Local-first AI workspace
           </div>
 
-          <h1 className="max-w-2xl text-balance text-2xl font-semibold leading-tight text-[var(--color-text-primary)] sm:text-3xl md:text-4xl">
+          <h1 className="max-w-2xl text-balance text-2xl font-semibold leading-tight text-[var(--color-text-primary)] sm:text-3xl lg:text-4xl">
             Start a focused conversation.
           </h1>
           <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--color-text-secondary)] sm:text-base">
@@ -68,7 +68,7 @@ export function EmptyState({
           <Button
             size="lg"
             onClick={onCreateNew}
-            className="mt-6 h-11 rounded-lg px-5 text-sm font-semibold md:mt-8 md:h-12 md:px-6"
+            className="mt-5 h-11 rounded-lg px-5 text-sm font-semibold sm:mt-6 md:h-12 md:px-6"
           >
             Start a conversation
             <ArrowRight className="h-4 w-4" />
@@ -76,7 +76,7 @@ export function EmptyState({
         </div>
 
         {showSetupCard && (
-          <div className="mx-auto mt-8 max-w-2xl rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4 text-left shadow-sm">
+          <div className="empty-setup-card mx-auto mt-5 max-w-2xl rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3 text-left shadow-sm sm:mt-6 sm:p-4">
             <div className="flex items-start gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)]">
                 <Key className="h-[18px] w-[18px]" />
@@ -102,7 +102,7 @@ export function EmptyState({
                   </button>
                 </div>
 
-                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   <div className="flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
                     <CheckCircle2 className={accessMode !== 'missing-key' ? 'h-4 w-4 text-[var(--color-accent)]' : 'h-4 w-4 text-[var(--color-text-tertiary)]'} />
                     {accessMode === 'byok' && 'OpenRouter key saved'}
@@ -115,7 +115,7 @@ export function EmptyState({
                   </div>
                 </div>
 
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-3 flex flex-wrap gap-2">
                   <Button size="sm" onClick={onOpenSettings}>
                     Open settings
                   </Button>
@@ -128,7 +128,7 @@ export function EmptyState({
           </div>
         )}
 
-        <div className="mt-8 grid gap-3 md:grid-cols-3">
+        <div className="empty-features mt-5 grid gap-3 sm:mt-6 md:grid-cols-3">
           {features.map((feature) => (
             <div
               key={feature.title}

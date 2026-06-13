@@ -12,6 +12,15 @@ const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 30 * 1000;
 
 const modelCooldowns = new Map<string, number>();
 const hostedUsage = new Map<string, { count: number; resetAt: number }>();
+type UsageMode = 'byok' | 'hosted-free';
+type HostedQuota = {
+  allowed: boolean;
+  mode: UsageMode;
+  limit: number;
+  remaining: number;
+  resetAt: number;
+  identity?: string;
+};
 
 export async function POST(request: NextRequest) {
   try {
@@ -39,13 +48,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const hostedQuota = reserveHostedQuota(request, key);
+    const hostedQuota = getHostedQuotaStatus(request, key);
     if (!hostedQuota.allowed) {
       return Response.json(
         {
           error: `Hosted free mode daily limit reached. Add your own OpenRouter key in Settings or try again after ${new Date(hostedQuota.resetAt).toLocaleString()}.`,
           rateLimitedModels: [],
-          hostedUsage: hostedQuota,
+          hostedUsage: publicHostedUsage(hostedQuota),
         },
         {
           status: 429,
@@ -57,9 +66,10 @@ export async function POST(request: NextRequest) {
     // Title generation (non-streaming)
     if (generateTitleFor) {
       const title = await generateTitle(messages, key, model);
+      const usage = commitHostedQuota(hostedQuota);
       return Response.json(
-        { title, hostedUsage: hostedQuota.mode === 'hosted-free' ? hostedQuota : undefined },
-        { headers: usageHeaders(hostedQuota.mode, hostedQuota) }
+        { title, hostedUsage: publicHostedUsage(usage) },
+        { headers: usageHeaders(usage.mode, usage) }
       );
     }
 
@@ -98,6 +108,7 @@ export async function POST(request: NextRequest) {
         }
 
         usedModel = tryModel;
+        const usage = commitHostedQuota(hostedQuota);
 
         // Transform the SSE stream to extract content deltas
         const reader = response.body.getReader();
@@ -155,7 +166,7 @@ export async function POST(request: NextRequest) {
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
             'X-Model-Used': usedModel,
-            ...usageHeaders(hostedQuota.mode, hostedQuota),
+            ...usageHeaders(usage.mode, usage),
           },
         });
       } catch (err) {
@@ -188,7 +199,7 @@ export async function POST(request: NextRequest) {
         error: formatChatFailure(lastError, failedModels, skippedModels),
         rateLimitedModels,
         retryAfterSeconds: lastError instanceof OpenRouterError ? lastError.retryAfterSeconds : undefined,
-        hostedUsage: hostedQuota.mode === 'hosted-free' ? hostedQuota : undefined,
+        hostedUsage: publicHostedUsage(hostedQuota),
       },
       {
         status: 502,
@@ -254,13 +265,7 @@ function getClientOpenRouterKey(request: NextRequest): string | null {
   return key || null;
 }
 
-function reserveHostedQuota(request: NextRequest, clientKey: string | null): {
-  allowed: boolean;
-  mode: 'byok' | 'hosted-free';
-  limit: number;
-  remaining: number;
-  resetAt: number;
-} {
+function getHostedQuotaStatus(request: NextRequest, clientKey: string | null): HostedQuota {
   if (clientKey) {
     return {
       allowed: true,
@@ -288,10 +293,10 @@ function reserveHostedQuota(request: NextRequest, clientKey: string | null): {
       limit,
       remaining: 0,
       resetAt: entry.resetAt,
+      identity,
     };
   }
 
-  entry.count += 1;
   hostedUsage.set(identity, entry);
   pruneHostedUsage(now);
 
@@ -301,13 +306,41 @@ function reserveHostedQuota(request: NextRequest, clientKey: string | null): {
     limit,
     remaining: Math.max(limit - entry.count, 0),
     resetAt: entry.resetAt,
+    identity,
   };
 }
 
-function usageHeaders(
-  mode: 'byok' | 'hosted-free',
-  usage: { limit: number; remaining: number; resetAt: number }
-): Record<string, string> {
+function commitHostedQuota(quota: HostedQuota): HostedQuota {
+  if (quota.mode === 'byok' || !quota.identity) return quota;
+
+  const now = Date.now();
+  const existing = hostedUsage.get(quota.identity);
+  const entry = existing && existing.resetAt > now
+    ? existing
+    : { count: 0, resetAt: getNextUtcMidnight(now) };
+  entry.count += 1;
+  hostedUsage.set(quota.identity, entry);
+
+  return {
+    ...quota,
+    allowed: entry.count <= quota.limit,
+    remaining: Math.max(quota.limit - entry.count, 0),
+    resetAt: entry.resetAt,
+  };
+}
+
+function publicHostedUsage(quota: HostedQuota): Omit<HostedQuota, 'identity'> | undefined {
+  if (quota.mode !== 'hosted-free') return undefined;
+  return {
+    allowed: quota.allowed,
+    mode: quota.mode,
+    limit: quota.limit,
+    remaining: quota.remaining,
+    resetAt: quota.resetAt,
+  };
+}
+
+function usageHeaders(mode: UsageMode, usage: { limit: number; remaining: number; resetAt: number }): Record<string, string> {
   if (mode === 'byok') {
     return {
       'X-OpenConvo-Mode': 'byok',

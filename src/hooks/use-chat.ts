@@ -222,6 +222,10 @@ export function useChat(
 
         // Generate title if this is the first exchange
         if (currentMessages.length <= 1 && onTitleGenerated) {
+          if (!openrouterApiKey) {
+            onTitleGenerated(buildLocalTitle(content.trim()));
+            return;
+          }
           try {
             const titleRes = await fetch('/api/chat', {
               method: 'POST',
@@ -533,4 +537,18 @@ function parseChatErrorDetails(error: unknown): {
     };
   }
   return { rateLimitedModels: [] };
+}
+
+function buildLocalTitle(content: string): string {
+  const words = content
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/[`*_#[\](){}>]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 6)
+    .join(' ');
+
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'New conversation';
 }

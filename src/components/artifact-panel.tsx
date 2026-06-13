@@ -43,9 +43,13 @@ export function ArtifactPanel({ artifacts, open, onClose, onUpdate, onDelete }: 
     content !== selected.content;
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
   };
 
   const handleSave = () => {

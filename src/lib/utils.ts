@@ -34,3 +34,16 @@ export function debounce<T extends (...args: unknown[]) => unknown>(fn: T, ms: n
     timer = setTimeout(() => fn(...args), ms);
   }) as T;
 }
+
+export function safeExternalUrl(url?: string | null): string | undefined {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url, 'https://openconvo.local');
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'mailto:') {
+      return url;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}

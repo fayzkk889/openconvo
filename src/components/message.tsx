@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { MarkdownRenderer } from '@/lib/markdown';
 import { MessageActions } from '@/components/message-actions';
 import { getModelName } from '@/lib/models';
+import { safeExternalUrl } from '@/lib/utils';
 import type { Message as MessageType } from '@/types/chat';
 
 interface MessageProps {
@@ -202,30 +203,34 @@ export function Message({
 
               {sourcesOpen && (
                 <div className="mt-2 flex flex-col gap-2">
-                  {message.searchResults!.map((source, idx) => (
-                    <a
-                      key={idx}
-                      href={source.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="group/source flex flex-col gap-1 rounded-md border border-[var(--color-border)] p-3 transition-colors hover:border-[var(--color-border-light)] hover:bg-[var(--color-bg-secondary)]"
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-semibold text-[var(--color-text-primary)] truncate">
-                          {source.title}
+                  {message.searchResults!.map((source, idx) => {
+                    const safeUrl = safeExternalUrl(source.url);
+                    const SourceWrapper = safeUrl ? 'a' : 'div';
+                    return (
+                      <SourceWrapper
+                        key={idx}
+                        {...(safeUrl ? { href: safeUrl, target: '_blank', rel: 'noopener noreferrer' } : {})}
+                        className="group/source flex flex-col gap-1 rounded-md border border-[var(--color-border)] p-3 transition-colors hover:border-[var(--color-border-light)] hover:bg-[var(--color-bg-secondary)]"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-semibold text-[var(--color-text-primary)] truncate">
+                            {source.title}
+                          </span>
+                          {safeUrl && (
+                            <ExternalLink className="h-3 w-3 shrink-0 text-[var(--color-text-tertiary)] opacity-0 group-hover/source:opacity-100 transition-opacity" />
+                          )}
+                        </div>
+                        <span className="text-[10px] text-[var(--color-text-tertiary)] truncate">
+                          {getSourceDomain(source.url) || source.url}
                         </span>
-                        <ExternalLink className="h-3 w-3 shrink-0 text-[var(--color-text-tertiary)] opacity-0 group-hover/source:opacity-100 transition-opacity" />
-                      </div>
-                      <span className="text-[10px] text-[var(--color-text-tertiary)] truncate">
-                        {getSourceDomain(source.url) || source.url}
-                      </span>
-                      {source.snippet && (
-                        <p className="mt-1.5 text-xs text-[var(--color-text-secondary)] line-clamp-2 leading-relaxed">
-                          {source.snippet}
-                        </p>
-                      )}
-                    </a>
-                  ))}
+                        {source.snippet && (
+                          <p className="mt-1.5 text-xs text-[var(--color-text-secondary)] line-clamp-2 leading-relaxed">
+                            {source.snippet}
+                          </p>
+                        )}
+                      </SourceWrapper>
+                    );
+                  })}
                 </div>
               )}
             </div>

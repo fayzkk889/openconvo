@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useConversations } from '@/hooks/use-conversations';
 import { useChat } from '@/hooks/use-chat';
 import { useModels } from '@/hooks/use-models';
@@ -38,6 +39,7 @@ export function AppShell() {
     researchEnabled,
     agentEnabled,
     setSearchEnabled,
+    setResearchEnabled,
     toggleSearch,
     toggleResearch,
     toggleAgent,
@@ -161,6 +163,9 @@ export function AppShell() {
   const handleToggleSearch = () => {
     const next = !searchEnabled;
     toggleSearch();
+    if (!next && researchEnabled) {
+      setResearchEnabled(false);
+    }
     updateSettings({ searchEnabled: next });
   };
 
@@ -219,7 +224,7 @@ export function AppShell() {
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen w-full overflow-hidden bg-[var(--color-bg-primary)]">
+      <div className="flex h-dvh w-full overflow-hidden bg-[var(--color-bg-primary)]">
         {/* Mobile Header */}
         <div className="md:hidden fixed top-0 left-0 right-0 h-14 bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)] z-20 flex items-center px-4 shadow-sm">
           <button
@@ -229,10 +234,14 @@ export function AppShell() {
           >
             <Menu size={20} />
           </button>
-          <div className="flex flex-1 items-center justify-center gap-2 font-semibold text-[var(--color-text-primary)]">
+          <Link
+            href="/"
+            className="flex flex-1 items-center justify-center gap-2 rounded-md font-semibold text-[var(--color-text-primary)] transition-opacity hover:opacity-85"
+            aria-label="Go to OpenConvo homepage"
+          >
             <img src="/mark-transparent.png" alt="" className="logo-image h-6 w-6 object-contain" />
             OpenConvo
-          </div>
+          </Link>
           <div className="w-8" /> {/* Spacer for centering */}
         </div>
 
@@ -266,7 +275,7 @@ export function AppShell() {
         />
 
         {/* Main Content */}
-        <main className="flex-1 relative flex flex-col h-full md:h-screen pt-14 md:pt-0">
+        <main className="flex-1 relative flex flex-col h-full md:h-dvh pt-14 md:pt-0">
           <ChatArea
             conversationId={activeId}
             conversation={activeConversation}

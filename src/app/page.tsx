@@ -125,7 +125,7 @@ export default function LandingPage() {
               </div>
               <div className="grid min-h-[420px] grid-cols-[160px_1fr]">
                 <aside className="border-r border-[var(--color-border)] bg-[var(--color-bg-primary)] p-3">
-                  {['Research notes', 'PDF summary', 'Launch checklist', 'Model tests'].map((item, index) => (
+                  {['Research notes', 'PDF summary', 'Project plan', 'Model tests'].map((item, index) => (
                     <div
                       key={item}
                       className={`mb-2 rounded-md px-3 py-2 text-xs ${index === 0 ? 'bg-[var(--color-bg-active)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)]'}`}
@@ -207,11 +207,11 @@ export default function LandingPage() {
           <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-6">
             <div className="flex items-center gap-3 text-sm font-semibold">
               <BookOpen className="h-5 w-5" />
-              Launch checklist
+              Open-source promise
             </div>
             <div className="mt-5 space-y-4 text-sm text-[var(--color-text-secondary)]">
-              <p>Publish the GitHub repo, set <span className="font-mono">NEXT_PUBLIC_GITHUB_URL</span>, connect a domain, and deploy the app with strict free-model routing.</p>
-              <p>Hosted free mode is available when a deployment provides a server OpenRouter key, with shared capacity, usage limits, and clear BYOK messaging.</p>
+              <p>OpenConvo is MIT-licensed, self-hostable, and built around local browser storage so users can inspect the code and keep control of their workspace.</p>
+              <p>Use the hosted app for a quick start, or bring your own keys when you want more reliable personal capacity.</p>
             </div>
           </div>
         </div>

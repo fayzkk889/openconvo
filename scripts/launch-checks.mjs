@@ -19,6 +19,7 @@ const exportLib = read('src/lib/export.ts');
 const markdown = read('src/lib/markdown.tsx');
 const messageComponent = read('src/components/message.tsx');
 const useSettings = read('src/hooks/use-settings.ts');
+const useChat = read('src/hooks/use-chat.ts');
 const appShell = read('src/components/app-shell.tsx');
 const sidebar = read('src/components/sidebar.tsx');
 const globals = read('src/app/globals.css');
@@ -57,6 +58,7 @@ check('settings loaded from localStorage are normalized', /normalizeSettings/.te
 check('app shell uses dynamic viewport height', /h-dvh/.test(appShell));
 check('app logos link to homepage', /href="\/"/.test(sidebar) && /href="\/"/.test(appShell));
 check('empty state has short viewport rules', /empty-features/.test(globals) && /max-height: 760px/.test(globals));
+check('chat streaming uses display smoothing', /createStreamingDisplay/.test(useChat) && /takeStreamingChunk/.test(useChat));
 check('test script is wired', packageJson.scripts?.test === 'node scripts/launch-checks.mjs');
 check('.env.example documents OpenRouter', /OPENROUTER_API_KEY/.test(envExample));
 check('.env.example documents Tavily', /TAVILY_API_KEY/.test(envExample));

@@ -1,11 +1,20 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
 import { Message, Attachment } from '@/types/chat';
 import { AIModel } from '@/types/models';
 import { SearchResponse } from '@/types/search';
 import * as storage from '@/lib/storage';
 import { generateId } from '@/lib/utils';
+
+const STREAM_FLUSH_MS = 18;
+const STREAM_FINISH_BUDGET_MS = 900;
+
+type StreamingDisplay = {
+  append: (content: string) => void;
+  finish: (finalContent: string) => Promise<void>;
+  cancel: () => void;
+};
 
 export function useChat(
   conversationId: string | null,
@@ -126,10 +135,13 @@ export function useChat(
           : m.content,
       }));
 
+      let streamDisplay: StreamingDisplay | null = null;
+
       try {
         abortRef.current = new AbortController();
         let fullContent = '';
         let finalModel = model;
+        streamDisplay = createStreamingDisplay(assistantId, () => finalModel, setMessages);
 
         const response = await fetch('/api/chat', {
           method: 'POST',
@@ -172,13 +184,7 @@ export function useChat(
             }
             if (data.content) {
               fullContent += data.content;
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? { ...m, content: fullContent, model: finalModel }
-                    : m
-                )
-              );
+              streamDisplay?.append(data.content);
             }
           } catch {
             // skip malformed
@@ -205,6 +211,8 @@ export function useChat(
         if (!fullContent.trim()) {
           throw new Error('The model returned an empty response. Please try again.');
         }
+
+        await streamDisplay?.finish(fullContent);
 
         // Save the complete assistant message
         await storage.addMessage(conversationId, {
@@ -252,6 +260,7 @@ export function useChat(
           }
         }
       } catch (err) {
+        streamDisplay?.cancel();
         if ((err as Error).name === 'AbortError') {
           setMessages((prev) => prev.filter((m) => m.id !== assistantId));
           return;
@@ -331,10 +340,13 @@ export function useChat(
       setMessages((prev) => [...prev.slice(0, msgIndex), placeholderMessage]);
       setIsStreaming(true);
 
+      let streamDisplay: StreamingDisplay | null = null;
+
       try {
         abortRef.current = new AbortController();
         let fullContent = '';
         let finalModel = model;
+        streamDisplay = createStreamingDisplay(assistantId, () => finalModel, setMessages);
 
         const currentMessages = await storage.getMessages(conversationId);
         const apiMessages = currentMessages.map((m) => ({
@@ -382,13 +394,7 @@ export function useChat(
             }
             if (data.content) {
               fullContent += data.content;
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? { ...m, content: fullContent, model: finalModel }
-                    : m
-                )
-              );
+              streamDisplay?.append(data.content);
             }
           } catch {
             // skip malformed
@@ -416,6 +422,8 @@ export function useChat(
           throw new Error('The model returned an empty response. Please try again.');
         }
 
+        await streamDisplay?.finish(fullContent);
+
         await storage.addMessage(conversationId, {
           role: 'assistant',
           content: fullContent,
@@ -428,6 +436,7 @@ export function useChat(
         const updatedMessages = await storage.getMessages(conversationId);
         setMessages(updatedMessages);
       } catch (err) {
+        streamDisplay?.cancel();
         if ((err as Error).name === 'AbortError') {
           setMessages((prev) => prev.filter((m) => m.id !== assistantId));
           return;
@@ -551,4 +560,96 @@ function buildLocalTitle(content: string): string {
     .join(' ');
 
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'New conversation';
+}
+
+function createStreamingDisplay(
+  assistantId: string,
+  getModel: () => string,
+  setMessages: Dispatch<SetStateAction<Message[]>>
+): StreamingDisplay {
+  let displayed = '';
+  let pending = '';
+  let timer: number | null = null;
+  let cancelled = false;
+
+  const render = () => {
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === assistantId
+          ? { ...message, content: displayed, model: getModel() }
+          : message
+      )
+    );
+  };
+
+  const flush = () => {
+    if (cancelled) {
+      timer = null;
+      return;
+    }
+
+    if (!pending) {
+      timer = null;
+      return;
+    }
+
+    const next = takeStreamingChunk(pending);
+    displayed += next;
+    pending = pending.slice(next.length);
+    render();
+    timer = window.setTimeout(flush, STREAM_FLUSH_MS);
+  };
+
+  return {
+    append(content: string) {
+      pending += content;
+      if (!timer) flush();
+    },
+    async finish(finalContent: string) {
+      const deadline = Date.now() + STREAM_FINISH_BUDGET_MS;
+      while (pending && Date.now() < deadline && !cancelled) {
+        const next = takeStreamingChunk(pending);
+        displayed += next;
+        pending = pending.slice(next.length);
+        render();
+        await wait(STREAM_FLUSH_MS);
+      }
+
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+      pending = '';
+      displayed = finalContent;
+      render();
+    },
+    cancel() {
+      cancelled = true;
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+      pending = '';
+    },
+  };
+}
+
+function takeStreamingChunk(text: string): string {
+  if (text.length <= 3) return text;
+
+  const leadingWhitespace = text.match(/^\s+/)?.[0];
+  if (leadingWhitespace) return leadingWhitespace;
+
+  const word = text.match(/^[^\s]+(\s+)?/)?.[0];
+  if (!word) return text.slice(0, 1);
+
+  if (word.length > 14) {
+    return word.slice(0, 8);
+  }
+
+  return word;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

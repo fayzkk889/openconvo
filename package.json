@@ -1,0 +1,40 @@
+{
+  "name": "openconvo",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "tsc --noEmit -p tsconfig.typecheck.json",
+    "test": "node scripts/launch-checks.mjs",
+    "check:env": "node scripts/check-env.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.14",
+    "@radix-ui/react-dropdown-menu": "^2.1.15",
+    "@radix-ui/react-tooltip": "^1.2.7",
+    "highlight.js": "^11.11.1",
+    "idb": "^8.0.2",
+    "lucide-react": "^0.511.0",
+    "next": "^15.5.19",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1"
+  },
+  "overrides": {
+    "postcss": "^8.5.15"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.8",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "tailwindcss": "^4.1.8",
+    "typescript": "^5.8.0"
+  }
+}

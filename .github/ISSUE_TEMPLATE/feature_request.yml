@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest an improvement for OpenConvo
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem should this solve?
+      description: Tell us what workflow or user need is missing.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the feature you would like.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Product area
+      options:
+        - Chat
+        - Models
+        - Files
+        - Search/research
+        - Projects
+        - Memory/prompts
+        - Deployment/self-hosting
+        - UI/UX
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Mention any workaround or similar product behavior.

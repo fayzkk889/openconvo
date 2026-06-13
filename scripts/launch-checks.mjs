@@ -21,6 +21,11 @@ const readme = read('README.md');
 const deployment = read('DEPLOYMENT.md');
 const privacyPage = read('src/app/privacy/page.tsx');
 const securityPage = read('src/app/security/page.tsx');
+const roadmap = read('ROADMAP.md');
+const githubSetup = read('GITHUB_SETUP.md');
+const bugTemplate = read('.github/ISSUE_TEMPLATE/bug_report.yml');
+const featureTemplate = read('.github/ISSUE_TEMPLATE/feature_request.yml');
+const prTemplate = read('.github/pull_request_template.md');
 
 const curatedIds = [...models.matchAll(/id:\s*'([^']+)'/g)].map((match) => match[1]);
 const defaultMatch = models.match(/DEFAULT_MODEL_ID\s*=\s*'([^']+)'/);
@@ -41,10 +46,16 @@ check('.env.example documents Tavily', /TAVILY_API_KEY/.test(envExample));
 check('.env.example documents hosted free limit', /OPENCONVO_HOSTED_FREE_DAILY_LIMIT/.test(envExample));
 check('.env.example documents GitHub URL', /NEXT_PUBLIC_GITHUB_URL/.test(envExample));
 check('README has setup instructions', /npm install/.test(readme) && /npm run dev/.test(readme));
+check('README has deploy button', /Deploy with Vercel/.test(readme));
 check('README links deployment guide', /DEPLOYMENT\.md/.test(readme));
+check('README links roadmap and contributing guide', /ROADMAP\.md/.test(readme) && /CONTRIBUTING\.md/.test(readme));
 check('deployment guide documents Vercel', /Vercel/.test(deployment) && /OPENROUTER_API_KEY/.test(deployment));
 check('privacy page documents local storage', /browser/.test(privacyPage) && /API keys/.test(privacyPage));
 check('security page documents hosted limits', /Hosted limits/.test(securityPage) && /rate limiting/.test(securityPage));
+check('roadmap documents non-goals', /Non-Goals/.test(roadmap));
+check('GitHub setup documents repo topics', /Topics/.test(githubSetup) && /openrouter/.test(githubSetup));
+check('GitHub issue templates exist', /Bug report/.test(bugTemplate) && /Feature request/.test(featureTemplate));
+check('pull request template requires safety checks', /Free-model routing/.test(prTemplate) && /npm run build/.test(prTemplate));
 check('license file exists', existsSync(join(root, 'LICENSE')));
 
 if (failures.length > 0) {

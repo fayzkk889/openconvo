@@ -1,5 +1,7 @@
 # OpenConvo
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ffayzkk889%2Fopenconvo&env=OPENROUTER_API_KEY,OPENCONVO_HOSTED_FREE_DAILY_LIMIT,TAVILY_API_KEY,NEXT_PUBLIC_GITHUB_URL&envDescription=OpenConvo%20uses%20OpenRouter%20for%20hosted%20free%20mode%2C%20Tavily%20for%20optional%20search%2C%20and%20a%20public%20GitHub%20URL%20for%20landing%20page%20links.&envLink=https%3A%2F%2Fgithub.com%2Ffayzkk889%2Fopenconvo%2Fblob%2Fmain%2FDEPLOYMENT.md)
+
 OpenConvo is a local-first, open-source AI chat workspace. It is designed for people who want a ChatGPT/Claude-style interface they can run themselves, with free OpenRouter models, optional web search, file context, projects, prompt snippets, memory, and exportable local data.
 
 Repository: https://github.com/fayzkk889/openconvo
@@ -117,6 +119,16 @@ For public deployments, OpenConvo protects the shared server-side OpenRouter key
 For a public launch, point your domain at the deployed app and set `NEXT_PUBLIC_GITHUB_URL` after the repository is public. Keep `/app` as the product route so the root domain can explain the project before users enter the workspace.
 
 See [DEPLOYMENT.md](./DEPLOYMENT.md) for the Vercel launch steps.
+
+## Roadmap
+
+See [ROADMAP.md](./ROADMAP.md) for current priorities, later ideas, and non-goals.
+
+## Contributing
+
+Issues and pull requests are welcome. Please read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a PR.
+
+For GitHub repository metadata, topics, and release setup, see [GITHUB_SETUP.md](./GITHUB_SETUP.md).
 
 ## Troubleshooting
 

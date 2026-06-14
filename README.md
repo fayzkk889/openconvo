@@ -84,12 +84,14 @@ OPENCONVO_HOSTED_FREE_DAILY_LIMIT=20
 TAVILY_API_KEY=tvly-your-key
 OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT=5
 NEXT_PUBLIC_GITHUB_URL=https://github.com/your-name/openconvo
+NEXT_PUBLIC_SITE_URL=https://openconvo.vercel.app
 ```
 
 `OPENROUTER_API_KEY` is required for chat unless supplied in Settings. `TAVILY_API_KEY` is optional.
 When `OPENROUTER_API_KEY` is set on a public deployment, visitors without their own key can use hosted free mode. `OPENCONVO_HOSTED_FREE_DAILY_LIMIT` controls the per-visitor daily limit for that shared mode.
 When `TAVILY_API_KEY` is set on a public deployment, visitors can try hosted web search. `OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT` controls the per-visitor daily search limit. Users who add their own Tavily key in Settings bypass the hosted search cap.
 `NEXT_PUBLIC_GITHUB_URL` is optional and only controls the GitHub link on the landing page.
+`NEXT_PUBLIC_SITE_URL` controls canonical social preview URLs and should match your production domain.
 
 ## Scripts
 

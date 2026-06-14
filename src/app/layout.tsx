@@ -1,11 +1,41 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { getSiteUrl } from '@/lib/site-url';
+
+const siteUrl = getSiteUrl();
+const siteDescription = 'A local-first, open-source AI chat workspace for verified free models, file-aware conversations, web search, projects, memory, and self-hosted control.';
 
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: 'OpenConvo - AI Chat Workspace',
-  description: 'A local-first, model-agnostic AI chat workspace. Open-source, self-hostable, and privacy-friendly.',
+  description: siteDescription,
+  applicationName: 'OpenConvo',
+  authors: [{ name: 'OpenConvo' }],
+  creator: 'OpenConvo',
+  publisher: 'OpenConvo',
   icons: {
     icon: '/favicon.svg',
+  },
+  openGraph: {
+    type: 'website',
+    url: siteUrl,
+    siteName: 'OpenConvo',
+    title: 'OpenConvo - AI Chat Workspace',
+    description: siteDescription,
+    images: [
+      {
+        url: '/opengraph-image',
+        width: 1200,
+        height: 630,
+        alt: 'OpenConvo - open-source AI chat workspace',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'OpenConvo - AI Chat Workspace',
+    description: siteDescription,
+    images: ['/opengraph-image'],
   },
 };
 

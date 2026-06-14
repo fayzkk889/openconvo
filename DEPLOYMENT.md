@@ -18,6 +18,7 @@ OPENCONVO_HOSTED_FREE_DAILY_LIMIT=20
 TAVILY_API_KEY=tvly-your-key
 OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT=5
 NEXT_PUBLIC_GITHUB_URL=https://github.com/fayzkk889/openconvo
+NEXT_PUBLIC_SITE_URL=https://openconvo.vercel.app
 ```
 
 Required:
@@ -30,6 +31,7 @@ Optional:
 - `TAVILY_API_KEY` enables hosted web search. Users can still bring their own Tavily key in Settings.
 - `OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT` controls shared hosted searches per visitor per day. Default is `5`.
 - `NEXT_PUBLIC_GITHUB_URL` controls the landing page GitHub link.
+- `NEXT_PUBLIC_SITE_URL` controls canonical Open Graph and social preview URLs.
 
 ## Vercel Steps
 

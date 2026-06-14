@@ -65,6 +65,10 @@ if (!hasValue('NEXT_PUBLIC_GITHUB_URL')) {
   warnings.push('NEXT_PUBLIC_GITHUB_URL is not set. The app will use the built-in OpenConvo repository URL.');
 }
 
+if (hasValue('NEXT_PUBLIC_SITE_URL') && !validUrl(process.env.NEXT_PUBLIC_SITE_URL)) {
+  failures.push('NEXT_PUBLIC_SITE_URL must be a valid https URL.');
+}
+
 if (!hasValue('TAVILY_API_KEY')) {
   warnings.push('TAVILY_API_KEY is not set. Web search will require users to add their own key in Settings.');
 }

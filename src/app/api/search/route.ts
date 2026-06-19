@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
-import { searchWeb } from '@/lib/search';
+import { searchWeb, searchWebMany } from '@/lib/search';
 import { enrichSearchResults } from '@/lib/web-extract';
+import { planResearchQueries } from '@/lib/research-planner';
 
 type SearchUsageMode = 'byok' | 'hosted-search';
 
@@ -45,7 +46,12 @@ export async function POST(request: NextRequest) {
     }
 
     const searchMode = mode === 'research' ? 'research' : 'search';
-    const results = await searchWeb(trimmedQuery, key, searchMode);
+    const researchPlan = searchMode === 'research'
+      ? planResearchQueries(trimmedQuery)
+      : null;
+    const results = researchPlan
+      ? await searchWebMany(researchPlan.queries, key, searchMode)
+      : await searchWeb(trimmedQuery, key, searchMode);
     const enrichedResults = await enrichSearchResults(results.results, {
       maxPages: searchMode === 'research' ? 5 : 2,
     });
@@ -60,7 +66,8 @@ export async function POST(request: NextRequest) {
       {
         headers: {
           ...hostedSearchHeaders(committedQuota.mode, committedQuota),
-          'X-OpenConvo-Search-Provider': results.provider || 'unknown',
+          'X-OpenConvo-Search-Provider': results.providers?.join(',') || results.provider || 'unknown',
+          'X-OpenConvo-Research-Queries': String(results.plannedQueries?.length || 1),
         },
       }
     );

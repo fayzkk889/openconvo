@@ -61,6 +61,33 @@ export async function searchWeb(
   };
 }
 
+export async function searchWebMany(
+  queries: string[],
+  clientKey?: string | null,
+  mode: SearchMode = 'research'
+): Promise<SearchResponse> {
+  const plannedQueries = queries.filter((query) => query.trim().length > 0);
+  const responses = await Promise.all(
+    plannedQueries.map((query) => searchWeb(query, clientKey, mode))
+  );
+  const results = dedupeResults(responses.flatMap((response) => response.results))
+    .slice(0, mode === 'research' ? 12 : 6);
+  const providers = Array.from(new Set(responses.flatMap((response) =>
+    response.provider ? [response.provider] : []
+  )));
+  const providerErrors = responses.flatMap((response) => response.providerErrors || []);
+
+  return {
+    query: plannedQueries[0] || '',
+    plannedQueries,
+    results,
+    providers,
+    provider: providers[0] || 'none',
+    answer: responses.find((response) => response.answer)?.answer,
+    providerErrors,
+  };
+}
+
 function getSearchProviders(): SearchProvider[] {
   return [
     tavilyProvider,

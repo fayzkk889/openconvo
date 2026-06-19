@@ -9,8 +9,10 @@ export interface SearchResult {
 
 export interface SearchResponse {
   query: string;
+  plannedQueries?: string[];
   results: SearchResult[];
   answer?: string;
   provider?: string;
+  providers?: string[];
   providerErrors?: string[];
 }

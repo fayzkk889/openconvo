@@ -154,9 +154,9 @@ export function EmptyState({
                     </span>
                   </div>
                   <div className="flex min-w-0 items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
-                    <CheckCircle2 className={hasTavilyKey ? 'h-4 w-4 text-[var(--color-accent)]' : 'h-4 w-4 text-[var(--color-text-tertiary)]'} />
+                    <CheckCircle2 className="h-4 w-4 text-[var(--color-accent)]" />
                     <span className="min-w-0 truncate">
-                      Tavily key {hasTavilyKey ? 'saved' : 'for search'}
+                      {hasTavilyKey ? 'Tavily search saved' : 'Keyless web search ready'}
                     </span>
                   </div>
                 </div>

@@ -324,8 +324,8 @@ export function SettingsModal({
                     onChange={(e) => onUpdateSettings({ tavilyApiKey: e.target.value })}
                   />
                   <p className="text-xs text-[var(--color-text-tertiary)]">
-                    Required for web search. Get your free key at <a href="https://tavily.com" target="_blank" rel="noreferrer" className="text-[var(--color-accent)] hover:underline">tavily.com</a>.
-                    If left blank, the app will try to use the server's environment variable.
+                    Optional. Tavily improves research quality, but OpenConvo can use built-in lightweight web search when no key is provided.
+                    Get a key at <a href="https://tavily.com" target="_blank" rel="noreferrer" className="text-[var(--color-accent)] hover:underline">tavily.com</a>.
                   </p>
                 </div>
               </div>

@@ -15,6 +15,7 @@ const models = read('src/lib/models.ts');
 const openrouter = read('src/lib/openrouter.ts');
 const chatRoute = read('src/app/api/chat/route.ts');
 const searchRoute = read('src/app/api/search/route.ts');
+const searchLib = read('src/lib/search.ts');
 const db = read('src/lib/db.ts');
 const exportLib = read('src/lib/export.ts');
 const markdown = read('src/lib/markdown.tsx');
@@ -56,8 +57,9 @@ check('dynamic model fetch requires :free ids', /id\.endsWith\(':free'\)/.test(o
 check('chat route rejects non-free model ids', /isFreeModelId\(model\)/.test(chatRoute));
 check('hosted quota commits after provider acceptance', /commitHostedQuota\(hostedQuota\)/.test(chatRoute) && /getHostedQuotaStatus/.test(chatRoute));
 check('hosted quota response omits internal identity', /publicHostedUsage/.test(chatRoute) && /Omit<HostedQuota, 'identity'>/.test(chatRoute));
-check('hosted search quota commits after Tavily success', /commitHostedSearchQuota\(hostedQuota\)/.test(searchRoute) && /getHostedSearchQuotaStatus/.test(searchRoute));
+check('hosted search quota commits after search success', /commitHostedSearchQuota\(hostedQuota\)/.test(searchRoute) && /getHostedSearchQuotaStatus/.test(searchRoute));
 check('hosted search quota has response headers', /X-OpenConvo-Search-Limit/.test(searchRoute) && /X-OpenConvo-Search-Remaining/.test(searchRoute));
+check('web search has a keyless fallback', /searchDuckDuckGo/.test(searchLib) && /TAVILY_API_KEY/.test(searchLib));
 check('database migration repairs artifact indexes', /artifactStore\.indexNames\.contains\('by-project'\)/.test(db));
 check('imports repair unsafe model ids', /resolveSafeModelId/.test(exportLib));
 check('imports cap large text fields', /MAX_MESSAGE_CHARS/.test(exportLib) && /MAX_ARTIFACT_CHARS/.test(exportLib));

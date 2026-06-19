@@ -29,13 +29,6 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Query is too long' }, { status: 400 });
     }
 
-    if (!hasTavilyKey(key)) {
-      return Response.json(
-        { error: 'Web search is unavailable. Add a Tavily key in Settings or configure TAVILY_API_KEY on the server.' },
-        { status: 503 }
-      );
-    }
-
     const hostedQuota = getHostedSearchQuotaStatus(request, key);
     if (!hostedQuota.allowed) {
       return Response.json(
@@ -73,10 +66,6 @@ export async function POST(request: NextRequest) {
 function getClientTavilyKey(request: NextRequest): string | null {
   const key = request.headers.get('x-tavily-key')?.trim();
   return key || null;
-}
-
-function hasTavilyKey(clientKey: string | null): boolean {
-  return Boolean(clientKey || process.env.TAVILY_API_KEY);
 }
 
 function getHostedSearchQuotaStatus(request: NextRequest, clientKey: string | null): HostedSearchQuota {

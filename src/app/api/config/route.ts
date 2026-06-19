@@ -4,7 +4,7 @@ export function GET() {
   const config: DeploymentConfig = {
     hostedFreeModeAvailable: Boolean(process.env.OPENROUTER_API_KEY),
     hostedFreeDailyLimit: getHostedFreeDailyLimit(),
-    hostedSearchAvailable: Boolean(process.env.TAVILY_API_KEY),
+    hostedSearchAvailable: true,
     hostedSearchDailyLimit: getHostedSearchDailyLimit(),
   };
 

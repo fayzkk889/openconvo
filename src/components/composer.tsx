@@ -1,14 +1,18 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { ArrowUp, BookOpen, GitCompare, Square, Workflow } from 'lucide-react';
+import { ArrowUp, BookOpen, Check, ChevronDown, GitCompare, Square, Workflow } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { FileUpload } from '@/components/file-upload';
-import { SearchToggle } from '@/components/search-toggle';
-import { ResearchToggle } from '@/components/research-toggle';
 import { AgentToggle } from '@/components/agent-toggle';
 import { ModelSelector } from '@/components/model-selector';
+import {
+  Dropdown,
+  DropdownTrigger,
+  DropdownContent,
+  DropdownItem,
+} from '@/components/ui/dropdown';
 import type { Attachment, TaskType } from '@/types/chat';
 import type { AIModel } from '@/types/models';
 import type { ModelReliability } from '@/types/models';
@@ -192,24 +196,42 @@ export function Composer({
                 onRemove={handleRemoveAttachment}
               />
             )}
-            <div className="relative">
-              <Workflow className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-tertiary)]" />
-              <select
-                value={taskType}
-                onChange={(event) => setTaskType(event.target.value as TaskType)}
-                className="h-8 max-w-[132px] rounded-md border border-transparent bg-transparent py-1 pl-7 pr-2 text-xs text-[var(--color-text-secondary)] outline-none transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] focus:border-[var(--color-border)] sm:max-w-[170px]"
-                aria-label="Task preset"
-                title={TASK_PRESETS.find((task) => task.id === taskType)?.description}
-              >
+            <Dropdown>
+              <DropdownTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 max-w-[160px] gap-1.5 px-2 text-xs text-[var(--color-text-secondary)]"
+                  aria-label="Task preset"
+                  title={TASK_PRESETS.find((task) => task.id === taskType)?.description}
+                >
+                  <Workflow className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-tertiary)]" />
+                  <span className="truncate">
+                    {TASK_PRESETS.find((task) => task.id === taskType)?.shortLabel || 'Auto'}
+                  </span>
+                  <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
+                </Button>
+              </DropdownTrigger>
+              <DropdownContent align="start" className="w-64">
                 {TASK_PRESETS.map((task) => (
-                  <option key={task.id} value={task.id}>
-                    {task.label}
-                  </option>
+                  <DropdownItem
+                    key={task.id}
+                    onClick={() => setTaskType(task.id)}
+                    className="items-start justify-between gap-3"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-[var(--color-text-primary)]">
+                        {task.label}
+                      </span>
+                      <span className="mt-0.5 block text-xs leading-5 text-[var(--color-text-tertiary)]">
+                        {task.description}
+                      </span>
+                    </span>
+                    {task.id === taskType && <Check className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-accent)]" />}
+                  </DropdownItem>
                 ))}
-              </select>
-            </div>
-            <SearchToggle enabled={searchEnabled} onToggle={onToggleSearch} />
-            <ResearchToggle enabled={researchEnabled} onToggle={onToggleResearch} />
+              </DropdownContent>
+            </Dropdown>
             <AgentToggle enabled={agentEnabled} onToggle={onToggleAgent} />
             <button
               type="button"

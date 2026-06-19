@@ -18,7 +18,7 @@ The public site has two surfaces:
 - Free-model-first OpenRouter integration with dynamic model discovery, `:free` filtering, and request-level zero-price enforcement.
 - Streaming chat with fallback across curated free models when a provider is temporarily rate limited.
 - Hosted free mode with server-side shared OpenRouter capacity and a daily per-visitor limit.
-- Optional Tavily web search and deeper research mode.
+- Automatic web research with a lightweight keyless fallback and optional Tavily quality boost.
 - File uploads for text, markdown, code, JSON, CSV, and PDF context.
 - Projects with custom instructions and optional project default models.
 - Conversation title generation based on the first exchange.
@@ -53,7 +53,7 @@ Free OpenRouter providers can still be rate limited upstream. In that case OpenC
 - Node.js 18.18 or newer.
 - npm.
 - OpenRouter API key from [openrouter.ai/keys](https://openrouter.ai/keys).
-- Tavily API key from [tavily.com](https://tavily.com), optional and only needed for web search.
+- Tavily API key from [tavily.com](https://tavily.com), optional for higher-quality web research.
 
 ## Quick Start
 
@@ -87,9 +87,9 @@ NEXT_PUBLIC_GITHUB_URL=https://github.com/your-name/openconvo
 NEXT_PUBLIC_SITE_URL=https://openconvo.vercel.app
 ```
 
-`OPENROUTER_API_KEY` is required for chat unless supplied in Settings. `TAVILY_API_KEY` is optional.
+`OPENROUTER_API_KEY` is required for chat unless supplied in Settings. `TAVILY_API_KEY` is optional; OpenConvo can use lightweight keyless search when it is not set.
 When `OPENROUTER_API_KEY` is set on a public deployment, visitors without their own key can use hosted free mode. `OPENCONVO_HOSTED_FREE_DAILY_LIMIT` controls the per-visitor daily limit for that shared mode.
-When `TAVILY_API_KEY` is set on a public deployment, visitors can try hosted web search. `OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT` controls the per-visitor daily search limit. Users who add their own Tavily key in Settings bypass the hosted search cap.
+Visitors can try hosted web search even without Tavily. `OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT` controls the per-visitor daily search limit. Users who add their own Tavily key in Settings bypass the hosted search cap and use Tavily directly.
 `NEXT_PUBLIC_GITHUB_URL` is optional and only controls the GitHub link on the landing page.
 `NEXT_PUBLIC_SITE_URL` controls canonical social preview URLs and should match your production domain.
 
@@ -118,7 +118,7 @@ npm run build
 
 OpenConvo has no database server. Deploy it like a regular Next.js app and configure environment variables in your host.
 
-For public deployments, OpenConvo protects shared server-side OpenRouter and Tavily keys with lightweight in-memory daily limits. This is enough for an early launch, but high-traffic deployments should add persistent rate limiting at the hosting edge. The safest open-source path remains personal/local self-hosting where each user supplies their own keys.
+For public deployments, OpenConvo protects shared server-side OpenRouter capacity and hosted search with lightweight in-memory daily limits. This is enough for an early launch, but high-traffic deployments should add persistent rate limiting at the hosting edge. The safest open-source path remains personal/local self-hosting where each user supplies their own keys.
 
 For a public launch, point your domain at the deployed app and set `NEXT_PUBLIC_GITHUB_URL` after the repository is public. Keep `/app` as the product route so the root domain can explain the project before users enter the workspace.
 

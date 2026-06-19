@@ -92,7 +92,7 @@ export function inferTaskType({
 
   if (attachments?.length) return 'file';
   if (researchEnabled || searchEnabled) return 'research';
-  if (/\b(source|sources|cite|citation|research|latest|current|today|news|market|compare|verify|fact check|fact-check)\b/.test(text)) {
+  if (/\b(source|sources|cite|citation|research|latest|current|today|yesterday|tomorrow|this week|this month|recent|newest|news|market|price|stock|weather|score|release|released|launch|launched|available|compare|verify|fact check|fact-check)\b/.test(text)) {
     return 'research';
   }
   if (/\b(code|bug|debug|typescript|javascript|react|next\.?js|api|function|component|error|stack trace|compile|build|database|sql|python)\b/.test(text)) {

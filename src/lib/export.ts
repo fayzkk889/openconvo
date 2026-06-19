@@ -234,6 +234,7 @@ function validateMessage(value: unknown): Message {
     model: typeof message.model === 'string' ? resolveSafeModelId(message.model) : undefined,
     attachments: normalizeImportedAttachments(message.attachments),
     searchResults: normalizeImportedSearchResults(message.searchResults),
+    researchTrace: normalizeImportedResearchTrace(message.researchTrace),
     researchMode: typeof message.researchMode === 'boolean' ? message.researchMode : undefined,
     agentMode: typeof message.agentMode === 'boolean' ? message.agentMode : undefined,
     taskType: normalizeTaskType(message.taskType),
@@ -297,6 +298,38 @@ function normalizeImportedSearchResults(value: unknown): SearchResultRef[] | und
   });
 
   return results.length > 0 ? results : undefined;
+}
+
+function normalizeImportedResearchTrace(value: unknown): Message['researchTrace'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const trace = value as Partial<NonNullable<Message['researchTrace']>>;
+  if (
+    typeof trace.query !== 'string' ||
+    typeof trace.sourceCount !== 'number' ||
+    typeof trace.openedCount !== 'number'
+  ) {
+    return undefined;
+  }
+
+  return {
+    query: trace.query.slice(0, 500),
+    plannedQueries: normalizeStringList(trace.plannedQueries, 8, 500),
+    provider: typeof trace.provider === 'string' ? trace.provider.slice(0, 80) : undefined,
+    providers: normalizeStringList(trace.providers, 8, 80),
+    providerErrors: normalizeStringList(trace.providerErrors, 10, 300),
+    sourceCount: Math.max(Math.floor(trace.sourceCount), 0),
+    openedCount: Math.max(Math.floor(trace.openedCount), 0),
+  };
+}
+
+function normalizeStringList(value: unknown, maxItems: number, maxChars: number): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const list = value.flatMap((item): string[] =>
+    typeof item === 'string' && item.trim()
+      ? [item.trim().slice(0, maxChars)]
+      : []
+  ).slice(0, maxItems);
+  return list.length > 0 ? list : undefined;
 }
 
 function validateArtifact(value: unknown): Artifact {

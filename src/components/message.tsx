@@ -43,6 +43,7 @@ export function Message({
   const isAssistant = message.role === 'assistant';
   const hasSearchResults =
     message.searchResults && message.searchResults.length > 0;
+  const researchTrace = message.researchTrace;
   const sourceDomains = hasSearchResults
     ? Array.from(
         new Set(
@@ -235,6 +236,43 @@ export function Message({
 
               {sourcesOpen && (
                 <div className="mt-2 flex flex-col gap-2">
+                  {researchTrace && (
+                    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3 text-xs text-[var(--color-text-secondary)]">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-[var(--color-text-primary)]">Research trace</span>
+                        <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">
+                          {researchTrace.sourceCount} sources
+                        </span>
+                        <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">
+                          {researchTrace.openedCount} opened
+                        </span>
+                        {(researchTrace.providers || (researchTrace.provider ? [researchTrace.provider] : [])).map((provider) => (
+                          <span key={provider} className="rounded-full border border-[var(--color-border)] px-2 py-0.5">
+                            {provider}
+                          </span>
+                        ))}
+                      </div>
+                      {researchTrace.plannedQueries && researchTrace.plannedQueries.length > 1 && (
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-tertiary)]">
+                            Queries
+                          </span>
+                          <ol className="space-y-1">
+                            {researchTrace.plannedQueries.map((query, index) => (
+                              <li key={`${query}-${index}`} className="line-clamp-1">
+                                {index + 1}. {query}
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
+                      {researchTrace.providerErrors && researchTrace.providerErrors.length > 0 && (
+                        <p className="mt-2 text-[var(--color-warning)]">
+                          Some providers failed, so OpenConvo used fallback sources.
+                        </p>
+                      )}
+                    </div>
+                  )}
                   {message.searchResults!.map((source, idx) => {
                     const safeUrl = safeExternalUrl(source.url);
                     const SourceWrapper = safeUrl ? 'a' : 'div';

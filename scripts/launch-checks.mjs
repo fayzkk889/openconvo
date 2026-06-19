@@ -67,6 +67,8 @@ check('web search supports optional SearxNG', /searxngProvider/.test(searchLib) 
 check('web search enriches results with page extraction', /enrichSearchResults/.test(searchRoute) && /fetchReadablePage/.test(webExtract));
 check('web extraction blocks local network fetches', /isBlockedHostname/.test(webExtract) && /169/.test(webExtract) && /192/.test(webExtract));
 check('research mode plans multiple queries', /planResearchQueries/.test(searchRoute) && /searchWebMany/.test(searchLib) && /MAX_PLANNED_QUERIES/.test(researchPlanner));
+check('research trace is saved on messages', /researchTrace/.test(useChat) && /buildResearchTrace/.test(useChat));
+check('research trace renders in source panel', /Research trace/.test(messageComponent) && /plannedQueries/.test(messageComponent));
 check('database migration repairs artifact indexes', /artifactStore\.indexNames\.contains\('by-project'\)/.test(db));
 check('imports repair unsafe model ids', /resolveSafeModelId/.test(exportLib));
 check('imports cap large text fields', /MAX_MESSAGE_CHARS/.test(exportLib) && /MAX_ARTIFACT_CHARS/.test(exportLib));

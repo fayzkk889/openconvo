@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
-import { Message, Attachment } from '@/types/chat';
+import { Message, Attachment, ResearchTrace } from '@/types/chat';
 import type { TaskType } from '@/types/chat';
 import { AIModel } from '@/types/models';
 import { SearchResponse } from '@/types/search';
@@ -161,7 +161,11 @@ export function useChat(
               title: r.title,
               url: r.url,
               snippet: r.snippet,
+              content: r.content,
+              extracted: r.extracted,
+              fetchedAt: r.fetchedAt,
             })),
+            researchTrace: buildResearchTrace(searchResults),
             timestamp: Date.now(),
           };
 
@@ -273,6 +277,7 @@ export function useChat(
               routingNote,
               compareRun: runModels.length > 1,
               searchResults: placeholderMessage.searchResults,
+              researchTrace: placeholderMessage.researchTrace,
             });
             onModelOutcome?.({
               modelId: finalModel,
@@ -308,6 +313,7 @@ export function useChat(
               routingNote,
               compareRun: runModels.length > 1,
               searchResults: placeholderMessage.searchResults,
+              researchTrace: placeholderMessage.researchTrace,
               isError: true,
             });
             setMessages((prev) =>
@@ -400,6 +406,7 @@ export function useChat(
         autoRouted: targetMessage.autoRouted,
         routingNote: targetMessage.routingNote,
         searchResults: targetMessage.searchResults,
+        researchTrace: targetMessage.researchTrace,
         timestamp: Date.now(),
       };
 
@@ -519,6 +526,7 @@ export function useChat(
           autoRouted: targetMessage.autoRouted,
           routingNote: targetMessage.routingNote,
           searchResults: targetMessage.searchResults,
+          researchTrace: targetMessage.researchTrace,
         });
         onModelOutcome?.({
           modelId: finalModel,
@@ -553,6 +561,7 @@ export function useChat(
           autoRouted: targetMessage.autoRouted,
           routingNote: targetMessage.routingNote,
           searchResults: targetMessage.searchResults,
+          researchTrace: targetMessage.researchTrace,
           isError: true,
         });
         setMessages((prev) =>
@@ -605,6 +614,19 @@ export function useChat(
     regenerateMessage,
     removeMessage,
     preferMessage,
+  };
+}
+
+function buildResearchTrace(searchResults: SearchResponse | null): ResearchTrace | undefined {
+  if (!searchResults?.results?.length) return undefined;
+  return {
+    query: searchResults.query,
+    plannedQueries: searchResults.plannedQueries,
+    provider: searchResults.provider,
+    providers: searchResults.providers,
+    providerErrors: searchResults.providerErrors,
+    sourceCount: searchResults.results.length,
+    openedCount: searchResults.results.filter((result) => result.extracted).length,
   };
 }
 

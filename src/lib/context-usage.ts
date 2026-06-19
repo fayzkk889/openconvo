@@ -19,10 +19,19 @@ export function estimateContextUsage(
       0
     );
     const sourceChars = (message.searchResults || []).reduce(
-      (sourceSum, source) => sourceSum + source.title.length + source.snippet.length + source.url.length,
+      (sourceSum, source) =>
+        sourceSum +
+        source.title.length +
+        source.snippet.length +
+        source.url.length +
+        (source.content?.length || 0),
       0
     );
-    return sum + message.content.length + attachmentChars + sourceChars;
+    const traceChars = (message.researchTrace?.plannedQueries || []).reduce(
+      (traceSum, query) => traceSum + query.length,
+      0
+    );
+    return sum + message.content.length + attachmentChars + sourceChars + traceChars;
   }, 0);
 
   const estimatedTokens = Math.ceil(totalChars / CHARS_PER_TOKEN);

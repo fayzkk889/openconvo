@@ -15,6 +15,16 @@ export interface SearchResultRef {
   fetchedAt?: number;
 }
 
+export interface ResearchTrace {
+  query: string;
+  plannedQueries?: string[];
+  provider?: string;
+  providers?: string[];
+  providerErrors?: string[];
+  sourceCount: number;
+  openedCount: number;
+}
+
 export type TaskType = 'auto' | 'quick' | 'research' | 'file' | 'code' | 'writing';
 
 export interface Message {
@@ -25,6 +35,7 @@ export interface Message {
   model?: string;
   attachments?: Attachment[];
   searchResults?: SearchResultRef[];
+  researchTrace?: ResearchTrace;
   researchMode?: boolean;
   agentMode?: boolean;
   taskType?: TaskType;

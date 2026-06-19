@@ -53,6 +53,7 @@ export function AppShell() {
     activeProject,
     activeId,
     activeConversation,
+    loading: conversationsLoading,
     searchQuery,
     setSearchQuery,
     showArchived,
@@ -220,7 +221,7 @@ export function AppShell() {
       : 'missing-key';
 
   // Prevent rendering until critical state is loaded to avoid flashes
-  if (!settingsLoaded) return null;
+  if (!settingsLoaded || !deploymentConfig.loaded || conversationsLoading) return null;
 
   return (
     <TooltipProvider>

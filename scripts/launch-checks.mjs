@@ -21,6 +21,8 @@ const markdown = read('src/lib/markdown.tsx');
 const messageComponent = read('src/components/message.tsx');
 const useSettings = read('src/hooks/use-settings.ts');
 const useChat = read('src/hooks/use-chat.ts');
+const useConversations = read('src/hooks/use-conversations.ts');
+const useDeploymentConfig = read('src/hooks/use-deployment-config.ts');
 const appShell = read('src/components/app-shell.tsx');
 const sidebar = read('src/components/sidebar.tsx');
 const emptyState = read('src/components/empty-state.tsx');
@@ -68,6 +70,8 @@ check('Open Graph image route exists', /ImageResponse/.test(ogImage) && /1200/.t
 check('mobile sidebar has wide overlay', /92vw/.test(sidebar));
 check('empty state has mobile and short viewport rules', /empty-features/.test(globals) && /max-height: 760px/.test(globals) && /max-width: 640px/.test(globals));
 check('chat streaming uses display smoothing', /createStreamingDisplay/.test(useChat) && /takeStreamingChunk/.test(useChat));
+check('active conversation survives refresh', /openconvo\.activeConversationId/.test(useConversations) && /getStoredConversationId/.test(useConversations) && /if \(loading\) return/.test(useConversations));
+check('deployment config gates first render', /loaded:\s*false/.test(useDeploymentConfig) && /deploymentConfig\.loaded/.test(appShell));
 check('test script is wired', packageJson.scripts?.test === 'node scripts/launch-checks.mjs');
 check('.env.example documents OpenRouter', /OPENROUTER_API_KEY/.test(envExample));
 check('.env.example documents Tavily', /TAVILY_API_KEY/.test(envExample));

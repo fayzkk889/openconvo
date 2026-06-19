@@ -4,6 +4,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { Conversation, Project } from '@/types/chat';
 import * as storage from '@/lib/storage';
 
+const ACTIVE_CONVERSATION_KEY = 'openconvo.activeConversationId';
+const ACTIVE_PROJECT_KEY = 'openconvo.activeProjectId';
+
 export function useConversations() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -24,12 +27,40 @@ export function useConversations() {
       const allProjects = await storage.getAllProjects();
       setConversations(sortConversations(all));
       setProjects(allProjects);
+      setActiveProjectId((current) =>
+        current && allProjects.some((project) => project.id === current)
+          ? current
+          : getStoredProjectId(allProjects)
+      );
+      setActiveId((current) =>
+        current && all.some((conversation) => conversation.id === current)
+          ? current
+          : getStoredConversationId(all)
+      );
     } catch (error) {
       console.error('Failed to load conversations:', error);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    if (activeId) {
+      localStorage.setItem(ACTIVE_CONVERSATION_KEY, activeId);
+    } else {
+      localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+    }
+  }, [activeId, loading]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (activeProjectId) {
+      localStorage.setItem(ACTIVE_PROJECT_KEY, activeProjectId);
+    } else {
+      localStorage.removeItem(ACTIVE_PROJECT_KEY);
+    }
+  }, [activeProjectId, loading]);
 
   const createNew = useCallback(async (model?: string): Promise<Conversation> => {
     const conv = await storage.createConversation(model, activeProjectId || undefined);
@@ -190,4 +221,16 @@ function sortConversations(conversations: Conversation[]): Conversation[] {
     }
     return b.updatedAt - a.updatedAt;
   });
+}
+
+function getStoredConversationId(conversations: Conversation[]): string | null {
+  const storedId = localStorage.getItem(ACTIVE_CONVERSATION_KEY);
+  if (!storedId) return null;
+  return conversations.some((conversation) => conversation.id === storedId) ? storedId : null;
+}
+
+function getStoredProjectId(projects: Project[]): string | null {
+  const storedId = localStorage.getItem(ACTIVE_PROJECT_KEY);
+  if (!storedId) return null;
+  return projects.some((project) => project.id === storedId) ? storedId : null;
 }

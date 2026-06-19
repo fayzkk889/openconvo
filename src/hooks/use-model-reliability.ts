@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { TaskType } from '@/types/chat';
 import type { ModelReliability } from '@/types/models';
-import { getModelReliability, recordModelOutcome } from '@/lib/storage';
+import { getModelReliability, recordModelOutcome, recordModelPreference } from '@/lib/storage';
 
 export function useModelReliability() {
   const [reliability, setReliability] = useState<ModelReliability[]>([]);
@@ -56,10 +56,26 @@ export function useModelReliability() {
     [recordOutcome]
   );
 
+  const recordPreference = useCallback(
+    async ({ modelId, taskType }: { modelId: string; taskType?: TaskType }) => {
+      try {
+        const updated = await recordModelPreference({ modelId, taskType });
+        setReliability((prev) => [
+          ...prev.filter((item) => item.id !== updated.id),
+          updated,
+        ]);
+      } catch (err) {
+        console.error('Failed to record model preference:', err);
+      }
+    },
+    []
+  );
+
   return {
     reliability,
     recordOutcome,
     recordRateLimitedModels,
+    recordPreference,
     refresh,
   };
 }

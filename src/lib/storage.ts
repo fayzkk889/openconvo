@@ -239,6 +239,7 @@ export async function recordModelOutcome({
     successes: existing?.successes || 0,
     failures: existing?.failures || 0,
     rateLimits: existing?.rateLimits || 0,
+    preferenceWins: existing?.preferenceWins || 0,
     totalLatencyMs: existing?.totalLatencyMs || 0,
     lastOutcome: outcome,
     lastUsedAt: now,
@@ -254,6 +255,35 @@ export async function recordModelOutcome({
     next.failures += 1;
   }
 
+  await db.put('modelReliability', next);
+  return next;
+}
+
+export async function recordModelPreference({
+  modelId,
+  taskType,
+}: {
+  modelId: string;
+  taskType?: TaskType;
+}): Promise<ModelReliability> {
+  const db = await getDB();
+  const normalizedTask = normalizeTaskType(taskType);
+  const id = modelReliabilityId(modelId, normalizedTask);
+  const existing = await db.get('modelReliability', id);
+  const now = Date.now();
+  const next: ModelReliability = {
+    id,
+    modelId,
+    taskType: normalizedTask,
+    successes: existing?.successes || 0,
+    failures: existing?.failures || 0,
+    rateLimits: existing?.rateLimits || 0,
+    preferenceWins: (existing?.preferenceWins || 0) + 1,
+    totalLatencyMs: existing?.totalLatencyMs || 0,
+    lastOutcome: 'success',
+    lastUsedAt: now,
+    updatedAt: now,
+  };
   await db.put('modelReliability', next);
   return next;
 }

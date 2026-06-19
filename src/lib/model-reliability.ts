@@ -36,11 +36,14 @@ export function getReliabilitySignal(
   const avgLatency = stat.successes > 0
     ? `, ~${formatDuration(stat.totalLatencyMs / stat.successes)} avg`
     : '';
+  const preferenceText = stat.preferenceWins
+    ? `, picked ${stat.preferenceWins}x`
+    : '';
 
   return {
     score,
     label: recommended ? 'Recommended' : successRate >= 70 ? 'Reliable' : 'Mixed',
-    detail: `${successRate}% ok over ${samples} run${samples === 1 ? '' : 's'}${avgLatency}`,
+    detail: `${successRate}% ok over ${samples} run${samples === 1 ? '' : 's'}${avgLatency}${preferenceText}`,
     recommended,
     samples,
   };
@@ -84,6 +87,7 @@ function scoreReliability(stat: ModelReliability | undefined, model: AIModel): n
   const successRate = samples > 0 ? stat.successes / samples : 0.5;
   const rateLimitPenalty = stat.rateLimits * 7;
   const failurePenalty = stat.failures * 5;
+  const preferenceBonus = Math.min((stat.preferenceWins || 0) * 8, 24);
   const recencyBonus = Date.now() - stat.lastUsedAt < 7 * 24 * 60 * 60 * 1000 ? 4 : 0;
   const latencyPenalty = stat.successes > 0
     ? Math.min((stat.totalLatencyMs / stat.successes) / 4000, 8)
@@ -91,6 +95,7 @@ function scoreReliability(stat: ModelReliability | undefined, model: AIModel): n
 
   score += successRate * 34;
   score += Math.min(stat.successes * 3, 12);
+  score += preferenceBonus;
   score += recencyBonus;
   score -= rateLimitPenalty + failurePenalty + latencyPenalty;
   return Math.max(0, Math.min(100, Math.round(score)));

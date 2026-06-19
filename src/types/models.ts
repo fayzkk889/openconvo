@@ -15,6 +15,7 @@ export interface ModelReliability {
   successes: number;
   failures: number;
   rateLimits: number;
+  preferenceWins?: number;
   totalLatencyMs: number;
   lastOutcome: 'success' | 'failure' | 'rate_limited';
   lastUsedAt: number;

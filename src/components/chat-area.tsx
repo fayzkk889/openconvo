@@ -26,6 +26,7 @@ interface ChatAreaProps {
   onStopStreaming: () => void;
   onRegenerateMessage: (id: string) => void;
   onDeleteMessage: (id: string) => void;
+  onPreferMessage: (id: string) => void;
   models: AIModel[];
   selectedModel: string;
   onSelectModel: (id: string) => void;
@@ -58,6 +59,7 @@ export function ChatArea({
   onStopStreaming,
   onRegenerateMessage,
   onDeleteMessage,
+  onPreferMessage,
   models,
   selectedModel,
   onSelectModel,
@@ -178,6 +180,7 @@ export function ChatArea({
               isStreaming={isStreaming && index === messages.length - 1}
               onRegenerate={() => onRegenerateMessage(message.id)}
               onDelete={() => onDeleteMessage(message.id)}
+              onPrefer={() => onPreferMessage(message.id)}
             />
             );
           })}

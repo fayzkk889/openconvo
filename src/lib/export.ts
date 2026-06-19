@@ -238,6 +238,7 @@ function validateMessage(value: unknown): Message {
     agentMode: typeof message.agentMode === 'boolean' ? message.agentMode : undefined,
     taskType: normalizeTaskType(message.taskType),
     compareRun: typeof message.compareRun === 'boolean' ? message.compareRun : undefined,
+    preferred: typeof message.preferred === 'boolean' ? message.preferred : undefined,
     isError: typeof message.isError === 'boolean' ? message.isError : undefined,
     timestamp: message.timestamp,
   };

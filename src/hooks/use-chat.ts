@@ -30,7 +30,8 @@ export function useChat(
     taskType?: TaskType;
     outcome: 'success' | 'failure' | 'rate_limited';
     latencyMs?: number;
-  }) => void
+  }) => void,
+  onModelPreference?: (preference: { modelId: string; taskType?: TaskType }) => void
 ) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -561,6 +562,24 @@ export function useChat(
     []
   );
 
+  const preferMessage = useCallback(
+    async (messageId: string) => {
+      const message = messages.find((item) => item.id === messageId);
+      if (!message?.compareRun || !message.model) return;
+      if (message.preferred) return;
+      await storage.updateMessage(messageId, { preferred: true });
+      setMessages((prev) =>
+        prev.map((item) =>
+          item.id === messageId
+            ? { ...item, preferred: true }
+            : item
+        )
+      );
+      onModelPreference?.({ modelId: message.model, taskType: message.taskType });
+    },
+    [messages, onModelPreference]
+  );
+
   return {
     messages,
     isStreaming,
@@ -569,6 +588,7 @@ export function useChat(
     stopStreaming,
     regenerateMessage,
     removeMessage,
+    preferMessage,
   };
 }
 

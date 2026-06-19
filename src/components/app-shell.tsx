@@ -51,6 +51,7 @@ export function AppShell() {
     reliability,
     recordOutcome,
     recordRateLimitedModels,
+    recordPreference,
   } = useModelReliability();
 
   const {
@@ -88,6 +89,7 @@ export function AppShell() {
     stopStreaming,
     regenerateMessage,
     removeMessage,
+    preferMessage,
   } = useChat(
     activeId, 
     selectedModel, 
@@ -105,7 +107,8 @@ export function AppShell() {
       markModelsCoolingDown(modelIds, retryAfterSeconds);
       recordRateLimitedModels(modelIds, taskType);
     },
-    recordOutcome
+    recordOutcome,
+    recordPreference
   );
 
   // Auto-close sidebar on mobile when a conversation is selected
@@ -346,6 +349,7 @@ export function AppShell() {
             onStopStreaming={stopStreaming}
             onRegenerateMessage={regenerateMessage}
             onDeleteMessage={removeMessage}
+            onPreferMessage={preferMessage}
             models={models}
             selectedModel={selectedModel}
             onSelectModel={handleSelectModel}

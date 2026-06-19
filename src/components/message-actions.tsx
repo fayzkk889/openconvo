@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
-import { Copy, RefreshCw, Trash2, Check } from 'lucide-react';
+import { Copy, RefreshCw, Trash2, Check, Trophy } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 
@@ -10,6 +10,8 @@ interface MessageActionsProps {
   role: 'user' | 'assistant' | 'system';
   onRegenerate?: () => void;
   onDelete?: () => void;
+  onPrefer?: () => void;
+  preferred?: boolean;
 }
 
 export function MessageActions({
@@ -17,6 +19,8 @@ export function MessageActions({
   role,
   onRegenerate,
   onDelete,
+  onPrefer,
+  preferred = false,
 }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
 
@@ -67,6 +71,24 @@ export function MessageActions({
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">Regenerate</TooltipContent>
+        </Tooltip>
+      )}
+
+      {role === 'assistant' && onPrefer && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon
+              onClick={onPrefer}
+              className={`h-7 w-7 ${preferred ? 'text-[var(--color-success)]' : ''}`}
+              aria-label={preferred ? 'Preferred response' : 'Mark as better response'}
+            >
+              <Trophy className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{preferred ? 'Preferred' : 'Mark better'}</TooltipContent>
         </Tooltip>
       )}
 

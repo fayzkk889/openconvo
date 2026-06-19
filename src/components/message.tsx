@@ -27,6 +27,7 @@ interface MessageProps {
   isStreaming?: boolean;
   onRegenerate?: () => void;
   onDelete?: () => void;
+  onPrefer?: () => void;
 }
 
 export function Message({
@@ -35,6 +36,7 @@ export function Message({
   isStreaming = false,
   onRegenerate,
   onDelete,
+  onPrefer,
 }: MessageProps) {
   const [sourcesOpen, setSourcesOpen] = useState(message.researchMode === true);
   const isUser = message.role === 'user';
@@ -110,6 +112,11 @@ export function Message({
               <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-text-tertiary)]">
                 <GitCompare className="h-3 w-3" />
                 Compare
+              </span>
+            )}
+            {isAssistant && message.preferred && (
+              <span className="inline-flex items-center rounded-full border border-[var(--color-success)]/30 bg-[var(--color-success)]/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-success)]">
+                Preferred
               </span>
             )}
           </div>
@@ -263,6 +270,8 @@ export function Message({
                 role={message.role}
                 onRegenerate={isLastAssistant ? onRegenerate : undefined}
                 onDelete={onDelete}
+                onPrefer={message.compareRun && !message.isError ? onPrefer : undefined}
+                preferred={message.preferred}
               />
             </div>
           )}

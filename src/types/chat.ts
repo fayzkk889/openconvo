@@ -26,6 +26,7 @@ export interface Message {
   agentMode?: boolean;
   taskType?: TaskType;
   compareRun?: boolean;
+  preferred?: boolean;
   isError?: boolean;
   timestamp: number;
 }

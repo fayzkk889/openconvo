@@ -46,6 +46,26 @@ export function getReliabilitySignal(
   };
 }
 
+export function recommendModelForTask(
+  models: AIModel[],
+  reliability: ModelReliability[],
+  taskType?: TaskType
+): AIModel | undefined {
+  const normalizedTask = normalizeTaskType(taskType);
+  const candidates = models.filter((model) => model.isFree && !isCoolingDown(model));
+  if (!candidates.length) return undefined;
+
+  return candidates
+    .map((model) => ({
+      model,
+      score: scoreReliability(
+        reliability.find((stat) => stat.modelId === model.id && stat.taskType === normalizedTask),
+        model
+      ),
+    }))
+    .sort((a, b) => b.score - a.score)[0]?.model;
+}
+
 function isRecommendedModel(
   model: AIModel,
   reliability: ModelReliability[],
@@ -53,18 +73,7 @@ function isRecommendedModel(
   allModels: AIModel[]
 ): boolean {
   if (!allModels.length || isCoolingDown(model)) return false;
-  const candidates = allModels.filter((item) => item.isFree && !isCoolingDown(item));
-  if (!candidates.length) return false;
-  const ranked = candidates
-    .map((item) => ({
-      id: item.id,
-      score: scoreReliability(
-        reliability.find((stat) => stat.modelId === item.id && stat.taskType === taskType),
-        item
-      ),
-    }))
-    .sort((a, b) => b.score - a.score);
-  return ranked[0]?.id === model.id;
+  return recommendModelForTask(allModels, reliability, taskType)?.id === model.id;
 }
 
 function scoreReliability(stat: ModelReliability | undefined, model: AIModel): number {

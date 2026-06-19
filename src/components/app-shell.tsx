@@ -13,6 +13,8 @@ import { useModelReliability } from '@/hooks/use-model-reliability';
 import { downloadExport, importFromFile } from '@/lib/export';
 import { clearAllData } from '@/lib/storage';
 import { resolveSafeModelId } from '@/lib/models';
+import { inferTaskType } from '@/lib/tasks';
+import { recommendModelForTask } from '@/lib/model-reliability';
 
 import { Sidebar } from './sidebar';
 import { ChatArea } from './chat-area';
@@ -295,10 +297,41 @@ export function AppShell() {
             error={error}
             onSendMessage={(args) => {
               const titleConversationId = activeId;
+              const effectiveSearchEnabled = args.searchEnabled ?? searchEnabled;
+              const effectiveResearchEnabled = args.researchEnabled ?? researchEnabled;
+              const shouldAutoRoute = !args.taskType || args.taskType === 'auto';
+              const effectiveTaskType = shouldAutoRoute
+                ? inferTaskType({
+                  content: args.content,
+                  attachments: args.attachments,
+                  searchEnabled: effectiveSearchEnabled,
+                  researchEnabled: effectiveResearchEnabled,
+                })
+                : args.taskType;
+              const hasLocalSignal = reliability.some((item) =>
+                item.taskType === effectiveTaskType &&
+                item.successes + item.failures + item.rateLimits > 0
+              );
+              const routedModel = shouldAutoRoute && hasLocalSignal
+                ? recommendModelForTask(models, reliability, effectiveTaskType)?.id
+                : undefined;
+              const safeRoutedModel = routedModel
+                ? resolveSafeModelId(routedModel, models)
+                : undefined;
+
+              if (safeRoutedModel && safeRoutedModel !== selectedModel) {
+                setSelectedModel(safeRoutedModel);
+                if (activeId) {
+                  updateConversationModel(activeId, safeRoutedModel);
+                }
+              }
+
               sendMessage({
                 ...args,
-                searchEnabled: args.searchEnabled ?? searchEnabled,
-                researchEnabled: args.researchEnabled ?? researchEnabled,
+                taskType: effectiveTaskType,
+                modelOverride: safeRoutedModel,
+                searchEnabled: effectiveSearchEnabled,
+                researchEnabled: effectiveResearchEnabled,
                 agentEnabled: args.agentEnabled ?? agentEnabled,
                 onTitleGenerated: (title) => {
                   if (titleConversationId) rename(titleConversationId, title);

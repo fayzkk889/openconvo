@@ -1,4 +1,4 @@
-import type { TaskType } from '@/types/chat';
+import type { Attachment, TaskType } from '@/types/chat';
 
 export const TASK_PRESETS: Array<{
   id: TaskType;
@@ -75,4 +75,35 @@ export function taskInstruction(taskType?: TaskType): string {
     default:
       return '';
   }
+}
+
+export function inferTaskType({
+  content,
+  attachments,
+  searchEnabled,
+  researchEnabled,
+}: {
+  content: string;
+  attachments?: Attachment[];
+  searchEnabled?: boolean;
+  researchEnabled?: boolean;
+}): TaskType {
+  const text = content.toLowerCase();
+
+  if (attachments?.length) return 'file';
+  if (researchEnabled || searchEnabled) return 'research';
+  if (/\b(source|sources|cite|citation|research|latest|current|today|news|market|compare|verify|fact check|fact-check)\b/.test(text)) {
+    return 'research';
+  }
+  if (/\b(code|bug|debug|typescript|javascript|react|next\.?js|api|function|component|error|stack trace|compile|build|database|sql|python)\b/.test(text)) {
+    return 'code';
+  }
+  if (/\b(write|rewrite|draft|edit|improve|polish|tone|copy|email|resume|bio|post|caption|grammar)\b/.test(text)) {
+    return 'writing';
+  }
+  if (text.length < 180 && /\b(what|who|when|where|why|how|define|explain|summarize)\b/.test(text)) {
+    return 'quick';
+  }
+
+  return 'quick';
 }

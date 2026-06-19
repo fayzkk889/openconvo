@@ -66,6 +66,7 @@ export function useChat(
       researchEnabled,
       agentEnabled,
       taskType,
+      modelOverride,
       onTitleGenerated,
     }: {
       content: string;
@@ -74,17 +75,19 @@ export function useChat(
       researchEnabled?: boolean;
       agentEnabled?: boolean;
       taskType?: TaskType;
+      modelOverride?: string;
       onTitleGenerated?: (title: string) => void;
     }) => {
       if (!conversationId || !content.trim()) return;
 
       setError(null);
+      const activeModel = modelOverride || model;
 
       // Save user message
       const userMessage = await storage.addMessage(conversationId, {
         role: 'user',
         content: content.trim(),
-        model,
+        model: activeModel,
         attachments: attachments?.length ? attachments : undefined,
         taskType,
       });
@@ -124,7 +127,7 @@ export function useChat(
         conversationId,
         role: 'assistant',
         content: '',
-        model,
+        model: activeModel,
         researchMode: shouldUseResearch,
         agentMode: agentEnabled === true,
         taskType,
@@ -154,7 +157,7 @@ export function useChat(
         abortRef.current = new AbortController();
         const requestStartedAt = Date.now();
         let fullContent = '';
-        let finalModel = model;
+        let finalModel = activeModel;
         streamDisplay = createStreamingDisplay(assistantId, () => finalModel, setMessages);
 
         const response = await fetch('/api/chat', {
@@ -165,7 +168,7 @@ export function useChat(
           },
           body: JSON.stringify({
             messages: apiMessages,
-            model,
+            model: activeModel,
             availableModels: models
               .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
               .map((item) => item.id),
@@ -285,7 +288,7 @@ export function useChat(
                   { role: 'user', content: withAttachmentCue(content.trim(), attachments) },
                   { role: 'assistant', content: fullContent.slice(0, 500) },
                 ],
-                model,
+                model: activeModel,
                 generateTitleFor: true,
               }),
             });
@@ -309,13 +312,13 @@ export function useChat(
         if (details.rateLimitedModels.length > 0) {
           onModelsRateLimited?.(details.rateLimitedModels, details.retryAfterSeconds, taskType);
         } else {
-          onModelOutcome?.({ modelId: model, taskType, outcome: 'failure' });
+          onModelOutcome?.({ modelId: activeModel, taskType, outcome: 'failure' });
         }
         setError(errorMessage);
         const storedError = await storage.addMessage(conversationId, {
           role: 'assistant',
           content: errorMessage,
-          model,
+          model: activeModel,
           researchMode: shouldUseResearch,
           agentMode: agentEnabled === true,
           taskType,

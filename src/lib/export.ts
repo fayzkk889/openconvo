@@ -2,6 +2,7 @@ import { exportAllData, importAllData } from './storage';
 import { Artifact, Attachment, Conversation, Message, Project, SearchResultRef } from '@/types/chat';
 import { DEFAULT_SETTINGS, ExportedSettings, Settings } from '@/types/settings';
 import { resolveSafeModelId } from '@/lib/models';
+import { normalizeTaskType } from '@/lib/tasks';
 
 const MAX_IMPORT_ITEMS = 10000;
 const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
@@ -235,6 +236,7 @@ function validateMessage(value: unknown): Message {
     searchResults: normalizeImportedSearchResults(message.searchResults),
     researchMode: typeof message.researchMode === 'boolean' ? message.researchMode : undefined,
     agentMode: typeof message.agentMode === 'boolean' ? message.agentMode : undefined,
+    taskType: normalizeTaskType(message.taskType),
     isError: typeof message.isError === 'boolean' ? message.isError : undefined,
     timestamp: message.timestamp,
   };

@@ -12,6 +12,8 @@ export interface SearchResultRef {
   snippet: string;
 }
 
+export type TaskType = 'auto' | 'quick' | 'research' | 'file' | 'code' | 'writing';
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -22,6 +24,7 @@ export interface Message {
   searchResults?: SearchResultRef[];
   researchMode?: boolean;
   agentMode?: boolean;
+  taskType?: TaskType;
   isError?: boolean;
   timestamp: number;
 }

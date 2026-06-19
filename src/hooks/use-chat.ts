@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
 import { Message, Attachment } from '@/types/chat';
+import type { TaskType } from '@/types/chat';
 import { AIModel } from '@/types/models';
 import { SearchResponse } from '@/types/search';
 import * as storage from '@/lib/storage';
@@ -58,6 +59,7 @@ export function useChat(
       searchEnabled,
       researchEnabled,
       agentEnabled,
+      taskType,
       onTitleGenerated,
     }: {
       content: string;
@@ -65,6 +67,7 @@ export function useChat(
       searchEnabled?: boolean;
       researchEnabled?: boolean;
       agentEnabled?: boolean;
+      taskType?: TaskType;
       onTitleGenerated?: (title: string) => void;
     }) => {
       if (!conversationId || !content.trim()) return;
@@ -77,13 +80,16 @@ export function useChat(
         content: content.trim(),
         model,
         attachments: attachments?.length ? attachments : undefined,
+        taskType,
       });
 
       setMessages((prev) => [...prev, userMessage]);
 
       // Perform web search if enabled
       let searchResults: SearchResponse | null = null;
-      if (searchEnabled || researchEnabled) {
+      const shouldUseSearch = searchEnabled || researchEnabled || taskType === 'research';
+      const shouldUseResearch = researchEnabled || taskType === 'research';
+      if (shouldUseSearch) {
         try {
           const searchRes = await fetch('/api/search', {
             method: 'POST',
@@ -91,7 +97,7 @@ export function useChat(
               'Content-Type': 'application/json',
               ...(tavilyApiKey ? { 'x-tavily-key': tavilyApiKey } : {}),
             },
-            body: JSON.stringify({ query: content.trim(), mode: researchEnabled ? 'research' : 'search' }),
+            body: JSON.stringify({ query: content.trim(), mode: shouldUseResearch ? 'research' : 'search' }),
           });
           if (searchRes.ok) {
             searchResults = await searchRes.json();
@@ -113,8 +119,9 @@ export function useChat(
         role: 'assistant',
         content: '',
         model,
-        researchMode: researchEnabled === true,
+        researchMode: shouldUseResearch,
         agentMode: agentEnabled === true,
+        taskType,
         searchResults: searchResults?.results?.map((r) => ({
           title: r.title,
           url: r.url,
@@ -158,8 +165,9 @@ export function useChat(
             systemPrompt: systemPrompt || undefined,
             searchResults: searchResults?.results,
             attachments,
-            researchMode: researchEnabled === true,
+            researchMode: shouldUseResearch,
             agentMode: agentEnabled === true,
+            taskType,
           }),
           signal: abortRef.current.signal,
         });
@@ -219,8 +227,9 @@ export function useChat(
           role: 'assistant',
           content: fullContent,
           model: finalModel,
-          researchMode: researchEnabled === true,
+          researchMode: shouldUseResearch,
           agentMode: agentEnabled === true,
+          taskType,
           searchResults: placeholderMessage.searchResults,
         });
 
@@ -275,8 +284,9 @@ export function useChat(
           role: 'assistant',
           content: errorMessage,
           model,
-          researchMode: researchEnabled === true,
+          researchMode: shouldUseResearch,
           agentMode: agentEnabled === true,
+          taskType,
           searchResults: placeholderMessage.searchResults,
           isError: true,
         });
@@ -333,6 +343,7 @@ export function useChat(
         model,
         researchMode: targetMessage.researchMode,
         agentMode: targetMessage.agentMode,
+        taskType: targetMessage.taskType,
         searchResults: targetMessage.searchResults,
         timestamp: Date.now(),
       };
@@ -373,6 +384,7 @@ export function useChat(
             attachments: userMsg.attachments,
             researchMode: targetMessage.researchMode === true,
             agentMode: targetMessage.agentMode === true,
+            taskType: targetMessage.taskType,
           }),
           signal: abortRef.current.signal,
         });
@@ -430,6 +442,7 @@ export function useChat(
           model: finalModel,
           researchMode: targetMessage.researchMode,
           agentMode: targetMessage.agentMode,
+          taskType: targetMessage.taskType,
           searchResults: targetMessage.searchResults,
         });
 
@@ -453,6 +466,7 @@ export function useChat(
           model,
           researchMode: targetMessage.researchMode,
           agentMode: targetMessage.agentMode,
+          taskType: targetMessage.taskType,
           searchResults: targetMessage.searchResults,
           isError: true,
         });

@@ -5,12 +5,12 @@ import {
   Braces,
   CheckCircle2,
   Github,
-  KeyRound,
   Laptop,
   LockKeyhole,
   MessageSquareText,
   Search,
   Sparkles,
+  Workflow,
 } from 'lucide-react';
 import { getGithubUrl } from '@/lib/site';
 
@@ -18,14 +18,14 @@ const githubUrl = getGithubUrl();
 
 const pillars = [
   {
-    title: 'Hosted free mode',
-    description: 'Try OpenConvo in the browser with shared free-model capacity and clear limits.',
+    title: 'Reliable free-model routing',
+    description: 'Use verified-free OpenRouter models with cooldowns, fallback handling, and clear shared limits.',
     icon: Sparkles,
   },
   {
-    title: 'Bring your own key',
-    description: 'Use your own OpenRouter and Tavily keys for more reliable private usage.',
-    icon: KeyRound,
+    title: 'Task-first workflows',
+    description: 'Switch from generic chat to quick answers, research, file analysis, code help, or writing support.',
+    icon: Workflow,
   },
   {
     title: 'Self-host anywhere',
@@ -35,6 +35,7 @@ const pillars = [
 ];
 
 const capabilities = [
+  'Task presets for research, files, code, writing, and quick answers',
   'Dynamic verified-free OpenRouter model list',
   'Streaming chat with fallback handling',
   'File-aware conversations and PDF context',
@@ -84,13 +85,13 @@ export default function LandingPage() {
           <div className="max-w-3xl min-w-0">
             <div className="mb-5 inline-flex max-w-full items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] sm:mb-6 sm:text-sm">
               <LockKeyhole className="h-4 w-4" />
-              <span className="truncate">Open-source, local-first AI workspace</span>
+              <span className="truncate">Reliable workflows for verified free AI models</span>
             </div>
             <h1 className="max-w-4xl text-4xl font-semibold leading-[1.02] tracking-normal text-[var(--color-text-primary)] sm:text-6xl lg:text-7xl">
               OpenConvo
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-[var(--color-text-secondary)] sm:mt-6 sm:text-xl sm:leading-8">
-              A clean AI chat workspace for verified free OpenRouter models, file-aware conversations, web research, projects, memory, and self-hosted control.
+              OpenConvo turns volatile free AI models into a useful local-first workspace: task presets, fallback routing, file context, web research, projects, memory, and self-hosted control.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Link
@@ -120,7 +121,7 @@ export default function LandingPage() {
                   <span className="truncate text-sm font-semibold">OpenConvo</span>
                 </div>
                 <div className="shrink-0 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-secondary)]">
-                  Verified free
+                  Workflow ready
                 </div>
               </div>
               <div className="grid min-h-[360px] grid-cols-1 sm:min-h-[420px] sm:grid-cols-[160px_1fr]">
@@ -145,7 +146,7 @@ export default function LandingPage() {
                         <span className="min-w-0 truncate">openai/gpt-oss-20b:free</span>
                       </div>
                       <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] p-4 text-sm leading-6 text-[var(--color-text-secondary)]">
-                        Here is a concise launch plan with hosted free mode, BYOK settings, deployment steps, and open-source docs.
+                        I’ll treat this as a launch workflow: compare the notes, extract risks, and produce a practical plan with sources and next actions.
                       </div>
                     </div>
                   </div>
@@ -155,7 +156,7 @@ export default function LandingPage() {
                       <MessageSquareText className="h-4 w-4" />
                       <Search className="h-4 w-4" />
                       <Braces className="h-4 w-4" />
-                      <span className="ml-auto hidden sm:inline">Free model selected</span>
+                      <span className="ml-auto hidden sm:inline">Research task selected</span>
                     </div>
                   </div>
                 </div>
@@ -168,9 +169,9 @@ export default function LandingPage() {
       <section id="features" className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
         <div className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
           <div className="max-w-2xl">
-            <h2 className="text-3xl font-semibold sm:text-4xl">Built for serious everyday AI work.</h2>
+            <h2 className="text-3xl font-semibold sm:text-4xl">Built for messy real-world AI work.</h2>
             <p className="mt-4 text-base leading-7 text-[var(--color-text-secondary)]">
-              OpenConvo combines the familiar chat workflow with the controls people expect from an open-source workspace.
+              Free models can be rate-limited, inconsistent, and hard to trust. OpenConvo adds workflow intent, safer routing, and local control around that messy reality.
             </p>
           </div>
           <div className="mt-10 grid gap-4 md:grid-cols-3">
@@ -210,7 +211,7 @@ export default function LandingPage() {
               Open-source promise
             </div>
             <div className="mt-5 space-y-4 text-sm text-[var(--color-text-secondary)]">
-              <p>OpenConvo is MIT-licensed, self-hostable, and built around local browser storage so users can inspect the code and keep control of their workspace.</p>
+              <p>OpenConvo is MIT-licensed, self-hostable, and built around local browser storage so users can inspect the code, bring their own keys, and keep control of their workspace.</p>
               <p>Use the hosted app for a quick start, or bring your own keys when you want more reliable personal capacity.</p>
             </div>
           </div>

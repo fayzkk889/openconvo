@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { ArrowRight, Brain, CheckCircle2, FileText, Globe, Key, Sparkles, X } from 'lucide-react';
+import { ArrowRight, CheckCircle2, FileText, Globe, Key, Sparkles, Workflow, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 type ChatAccessMode = 'hosted-free' | 'byok' | 'missing-key';
@@ -19,14 +19,14 @@ interface EmptyStateProps {
 
 const features = [
   {
-    icon: Brain,
-    title: 'Switch models',
-    description: 'Use free OpenRouter models without changing your workflow.',
+    icon: Workflow,
+    title: 'Pick the task',
+    description: 'Use presets for quick answers, research, files, code, and writing.',
   },
   {
     icon: Globe,
-    title: 'Search when needed',
-    description: 'Ground answers with web context only when the task calls for it.',
+    title: 'Handle model limits',
+    description: 'Free-model cooldowns and fallbacks keep failures understandable.',
   },
   {
     icon: FileText,
@@ -62,14 +62,14 @@ export function EmptyState({
 
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)]">
             <Sparkles className="h-3.5 w-3.5 text-[var(--color-text-primary)]" />
-            Local-first AI workspace
+            Reliable workflows for free AI models
           </div>
 
           <h1 className="empty-title w-full max-w-2xl text-balance text-2xl font-semibold leading-tight text-[var(--color-text-primary)] sm:text-3xl lg:text-4xl">
-            Start a focused conversation.
+            Start with the task, not the model.
           </h1>
           <p className="empty-subtitle mt-3 max-w-xl text-sm leading-6 text-[var(--color-text-secondary)] sm:text-base">
-            A clean place for model switching, grounded answers, and file-aware chats.
+            OpenConvo adds workflow intent, file context, search, and fallback routing around verified free models.
           </p>
 
           <Button

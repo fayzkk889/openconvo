@@ -2,7 +2,7 @@ import { ImageResponse } from 'next/og';
 import { getSiteUrl } from '@/lib/site-url';
 
 export const runtime = 'edge';
-export const alt = 'OpenConvo - open-source AI chat workspace';
+export const alt = 'OpenConvo - reliable open-source AI workspace for free models';
 export const size = {
   width: 1200,
   height: 630,
@@ -62,7 +62,7 @@ export default function Image() {
               OpenConvo
             </div>
             <div style={{ marginTop: 8, fontSize: 24, color: '#a7a9b0' }}>
-              Open-source AI chat workspace
+              Reliable workflows for free AI models
             </div>
           </div>
         </div>
@@ -77,7 +77,7 @@ export default function Image() {
               letterSpacing: 0,
             }}
           >
-            Local-first chat for free models, files, and web research.
+            Make volatile free models useful: tasks, files, search, and fallback routing.
           </div>
           <div
             style={{
@@ -88,7 +88,7 @@ export default function Image() {
               color: '#d9d9de',
             }}
           >
-            {['Verified free models', 'BYOK', 'Self-hostable'].map((item) => (
+            {['Task presets', 'Verified free models', 'Self-hostable'].map((item) => (
               <div
                 key={item}
                 style={{

@@ -3,7 +3,7 @@ import './globals.css';
 import { getSiteUrl } from '@/lib/site-url';
 
 const siteUrl = getSiteUrl();
-const siteDescription = 'A local-first, open-source AI chat workspace for verified free models, file-aware conversations, web search, projects, memory, and self-hosted control.';
+const siteDescription = 'An open-source AI workspace that makes verified free models more reliable with task presets, fallback routing, file context, search, and local-first control.';
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
         url: '/opengraph-image',
         width: 1200,
         height: 630,
-        alt: 'OpenConvo - open-source AI chat workspace',
+    alt: 'OpenConvo - reliable open-source AI workspace for free models',
       },
     ],
   },

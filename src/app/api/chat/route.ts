@@ -3,7 +3,8 @@ import { streamChat, generateTitle, ChatMessage, OpenRouterError, formatOpenRout
 import { FALLBACK_CHAIN, isFreeModelId } from '@/lib/models';
 import { buildSystemPrompt } from '@/lib/prompts';
 import { SearchResult } from '@/types/search';
-import { Attachment } from '@/types/chat';
+import { Attachment, TaskType } from '@/types/chat';
+import { normalizeTaskType } from '@/lib/tasks';
 
 const MAX_MESSAGES = 100;
 const MAX_MESSAGE_CHARS = 50000;
@@ -34,6 +35,7 @@ export async function POST(request: NextRequest) {
       attachments,
       researchMode,
       agentMode,
+      taskType,
       generateTitleFor,
       availableModels,
     } = body;
@@ -97,6 +99,7 @@ export async function POST(request: NextRequest) {
           activeModel: tryModel,
           researchMode,
           agentMode,
+          taskType,
           searchResults,
           attachments,
         });
@@ -388,6 +391,7 @@ function validateChatBody(body: unknown): {
   attachments?: Attachment[];
   researchMode?: boolean;
   agentMode?: boolean;
+  taskType?: TaskType;
   generateTitleFor?: boolean;
   availableModels: string[];
 } {
@@ -429,6 +433,7 @@ function validateChatBody(body: unknown): {
     attachments: normalizeAttachments(candidate.attachments),
     researchMode: candidate.researchMode === true,
     agentMode: candidate.agentMode === true,
+    taskType: normalizeTaskType(candidate.taskType),
     generateTitleFor: candidate.generateTitleFor === true,
     availableModels: normalizeAvailableModels(candidate.availableModels),
   };

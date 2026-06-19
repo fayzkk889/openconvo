@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { ArrowUp, BookOpen, Square } from 'lucide-react';
+import { ArrowUp, BookOpen, Square, Workflow } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { FileUpload } from '@/components/file-upload';
@@ -9,9 +9,10 @@ import { SearchToggle } from '@/components/search-toggle';
 import { ResearchToggle } from '@/components/research-toggle';
 import { AgentToggle } from '@/components/agent-toggle';
 import { ModelSelector } from '@/components/model-selector';
-import type { Attachment } from '@/types/chat';
+import type { Attachment, TaskType } from '@/types/chat';
 import type { AIModel } from '@/types/models';
 import type { PromptSnippet } from '@/types/settings';
+import { TASK_PRESETS } from '@/lib/tasks';
 
 type ChatAccessMode = 'hosted-free' | 'byok' | 'missing-key';
 
@@ -22,6 +23,7 @@ interface ComposerProps {
     searchEnabled?: boolean;
     researchEnabled?: boolean;
     agentEnabled?: boolean;
+    taskType?: TaskType;
   }) => void;
   isStreaming: boolean;
   onStop: () => void;
@@ -62,6 +64,7 @@ export function Composer({
 }: ComposerProps) {
   const [content, setContent] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [taskType, setTaskType] = useState<TaskType>('auto');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const canSend = content.trim().length > 0 && !isStreaming;
@@ -75,10 +78,11 @@ export function Composer({
       searchEnabled,
       researchEnabled,
       agentEnabled,
+      taskType,
     });
     setContent('');
     setAttachments([]);
-  }, [canSend, content, attachments, searchEnabled, researchEnabled, agentEnabled, onSend]);
+  }, [canSend, content, attachments, searchEnabled, researchEnabled, agentEnabled, taskType, onSend]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -92,6 +96,7 @@ export function Composer({
 
   const handleAttach = useCallback((attachment: Attachment) => {
     setAttachments((prev) => [...prev, attachment]);
+    setTaskType((prev) => prev === 'auto' ? 'file' : prev);
   }, []);
 
   const handleRemoveAttachment = useCallback((id: string) => {
@@ -165,6 +170,22 @@ export function Composer({
                 onRemove={handleRemoveAttachment}
               />
             )}
+            <div className="relative">
+              <Workflow className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-tertiary)]" />
+              <select
+                value={taskType}
+                onChange={(event) => setTaskType(event.target.value as TaskType)}
+                className="h-8 max-w-[132px] rounded-md border border-transparent bg-transparent py-1 pl-7 pr-2 text-xs text-[var(--color-text-secondary)] outline-none transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] focus:border-[var(--color-border)] sm:max-w-[170px]"
+                aria-label="Task preset"
+                title={TASK_PRESETS.find((task) => task.id === taskType)?.description}
+              >
+                {TASK_PRESETS.map((task) => (
+                  <option key={task.id} value={task.id}>
+                    {task.label}
+                  </option>
+                ))}
+              </select>
+            </div>
             <SearchToggle enabled={searchEnabled} onToggle={onToggleSearch} />
             <ResearchToggle enabled={researchEnabled} onToggle={onToggleResearch} />
             <AgentToggle enabled={agentEnabled} onToggle={onToggleAgent} />

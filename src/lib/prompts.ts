@@ -1,5 +1,6 @@
 import { SearchResult } from '@/types/search';
-import { Attachment } from '@/types/chat';
+import { Attachment, TaskType } from '@/types/chat';
+import { taskInstruction } from '@/lib/tasks';
 
 export const DEFAULT_SYSTEM_PROMPT = `You are a helpful, knowledgeable, and friendly AI assistant. You provide clear, accurate, and well-structured responses. When you don't know something, you say so honestly. You format your responses using Markdown when appropriate.`;
 
@@ -10,6 +11,7 @@ export function buildSystemPrompt({
   activeModel,
   researchMode,
   agentMode,
+  taskType,
   searchResults,
   attachments,
 }: {
@@ -17,6 +19,7 @@ export function buildSystemPrompt({
   activeModel?: string;
   researchMode?: boolean;
   agentMode?: boolean;
+  taskType?: TaskType;
   searchResults?: SearchResult[];
   attachments?: Attachment[];
 }): string {
@@ -32,6 +35,11 @@ export function buildSystemPrompt({
 
   if (agentMode) {
     prompt += '\n\n## Agent Mode\nThe user requested an agent-style response. Work like a careful task runner: identify the goal, break it into concrete steps, use available context and tools represented in this chat, report progress and assumptions, and finish with a clear result. Do not claim to have taken external actions that are not available in this app. Ask for clarification only if you are blocked or the next action would be risky.';
+  }
+
+  const taskPrompt = taskInstruction(taskType);
+  if (taskPrompt) {
+    prompt += `\n\n## Selected Task\n${taskPrompt}`;
   }
 
   if (searchResults && searchResults.length > 0) {

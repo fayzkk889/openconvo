@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useEffect, useState } from 'react';
-import { Message, Attachment, Conversation } from '@/types/chat';
+import { Message, Attachment, Conversation, TaskType } from '@/types/chat';
 import { AIModel } from '@/types/models';
 import { PromptSnippet } from '@/types/settings';
 import { Message as MessageComponent } from './message';
@@ -21,7 +21,7 @@ interface ChatAreaProps {
   messages: Message[];
   isStreaming: boolean;
   error: string | null;
-  onSendMessage: (args: { content: string; attachments?: Attachment[]; searchEnabled?: boolean; researchEnabled?: boolean; agentEnabled?: boolean }) => void;
+  onSendMessage: (args: { content: string; attachments?: Attachment[]; searchEnabled?: boolean; researchEnabled?: boolean; agentEnabled?: boolean; taskType?: TaskType }) => void;
   onStopStreaming: () => void;
   onRegenerateMessage: (id: string) => void;
   onDeleteMessage: (id: string) => void;
@@ -136,7 +136,7 @@ export function ChatArea({
     );
   }
 
-  const handleSend = (args: { content: string; attachments?: Attachment[]; searchEnabled?: boolean; researchEnabled?: boolean; agentEnabled?: boolean }) => {
+  const handleSend = (args: { content: string; attachments?: Attachment[]; searchEnabled?: boolean; researchEnabled?: boolean; agentEnabled?: boolean; taskType?: TaskType }) => {
     onSendMessage(args);
     setTimeout(scrollToBottom, 50);
   };

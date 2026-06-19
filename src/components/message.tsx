@@ -17,6 +17,7 @@ import { MarkdownRenderer } from '@/lib/markdown';
 import { MessageActions } from '@/components/message-actions';
 import { getModelName } from '@/lib/models';
 import { safeExternalUrl } from '@/lib/utils';
+import { TASK_PRESETS } from '@/lib/tasks';
 import type { Message as MessageType } from '@/types/chat';
 
 interface MessageProps {
@@ -46,6 +47,9 @@ export function Message({
         )
       )
     : [];
+  const taskPreset = message.taskType && message.taskType !== 'auto'
+    ? TASK_PRESETS.find((task) => task.id === message.taskType)
+    : null;
   const showStreamingCursor =
     isStreaming && isAssistant && !message.content && !message.isError;
 
@@ -88,6 +92,11 @@ export function Message({
               <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-warning)]">
                 <Microscope className="h-3 w-3" />
                 Research
+              </span>
+            )}
+            {isAssistant && taskPreset && !message.researchMode && (
+              <span className="inline-flex items-center rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-text-tertiary)]">
+                {taskPreset.shortLabel}
               </span>
             )}
             {isAssistant && message.agentMode && (

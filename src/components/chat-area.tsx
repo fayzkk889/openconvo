@@ -22,7 +22,7 @@ interface ChatAreaProps {
   messages: Message[];
   isStreaming: boolean;
   error: string | null;
-  onSendMessage: (args: { content: string; attachments?: Attachment[]; searchEnabled?: boolean; researchEnabled?: boolean; agentEnabled?: boolean; taskType?: TaskType }) => void;
+  onSendMessage: (args: { content: string; attachments?: Attachment[]; searchEnabled?: boolean; researchEnabled?: boolean; agentEnabled?: boolean; taskType?: TaskType; compareEnabled?: boolean }) => void;
   onStopStreaming: () => void;
   onRegenerateMessage: (id: string) => void;
   onDeleteMessage: (id: string) => void;
@@ -139,7 +139,7 @@ export function ChatArea({
     );
   }
 
-  const handleSend = (args: { content: string; attachments?: Attachment[]; searchEnabled?: boolean; researchEnabled?: boolean; agentEnabled?: boolean; taskType?: TaskType }) => {
+  const handleSend = (args: { content: string; attachments?: Attachment[]; searchEnabled?: boolean; researchEnabled?: boolean; agentEnabled?: boolean; taskType?: TaskType; compareEnabled?: boolean }) => {
     onSendMessage(args);
     setTimeout(scrollToBottom, 50);
   };

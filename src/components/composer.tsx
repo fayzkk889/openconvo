@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { ArrowUp, BookOpen, Square, Workflow } from 'lucide-react';
+import { ArrowUp, BookOpen, GitCompare, Square, Workflow } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { FileUpload } from '@/components/file-upload';
@@ -25,6 +25,7 @@ interface ComposerProps {
     researchEnabled?: boolean;
     agentEnabled?: boolean;
     taskType?: TaskType;
+    compareEnabled?: boolean;
   }) => void;
   isStreaming: boolean;
   onStop: () => void;
@@ -68,6 +69,7 @@ export function Composer({
   const [content, setContent] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [taskType, setTaskType] = useState<TaskType>('auto');
+  const [compareEnabled, setCompareEnabled] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const canSend = content.trim().length > 0 && !isStreaming;
@@ -82,10 +84,11 @@ export function Composer({
       researchEnabled,
       agentEnabled,
       taskType,
+      compareEnabled,
     });
     setContent('');
     setAttachments([]);
-  }, [canSend, content, attachments, searchEnabled, researchEnabled, agentEnabled, taskType, onSend]);
+  }, [canSend, content, attachments, searchEnabled, researchEnabled, agentEnabled, taskType, compareEnabled, onSend]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -135,6 +138,7 @@ export function Composer({
                 Search trial: {hostedSearchDailyLimit}/day
               </>
             )}
+            {compareEnabled && ' Compare uses 2 model runs.'}
           </span>
           {accessMode === 'hosted-free' && (
             <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">
@@ -192,6 +196,19 @@ export function Composer({
             <SearchToggle enabled={searchEnabled} onToggle={onToggleSearch} />
             <ResearchToggle enabled={researchEnabled} onToggle={onToggleResearch} />
             <AgentToggle enabled={agentEnabled} onToggle={onToggleAgent} />
+            <button
+              type="button"
+              onClick={() => setCompareEnabled((prev) => !prev)}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
+                compareEnabled
+                  ? 'bg-[var(--color-accent-muted)] text-[var(--color-accent)]'
+                  : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'
+              }`}
+              aria-label="Compare models"
+              title="Compare the selected model with another strong free model"
+            >
+              <GitCompare className="h-4 w-4" />
+            </button>
             {promptSnippets.length > 0 && (
               <div className="relative">
                 <BookOpen className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-tertiary)]" />

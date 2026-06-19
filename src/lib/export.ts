@@ -237,6 +237,7 @@ function validateMessage(value: unknown): Message {
     researchMode: typeof message.researchMode === 'boolean' ? message.researchMode : undefined,
     agentMode: typeof message.agentMode === 'boolean' ? message.agentMode : undefined,
     taskType: normalizeTaskType(message.taskType),
+    compareRun: typeof message.compareRun === 'boolean' ? message.compareRun : undefined,
     isError: typeof message.isError === 'boolean' ? message.isError : undefined,
     timestamp: message.timestamp,
   };

@@ -67,6 +67,7 @@ export function useChat(
       agentEnabled,
       taskType,
       modelOverride,
+      compareModels,
       onTitleGenerated,
     }: {
       content: string;
@@ -76,6 +77,7 @@ export function useChat(
       agentEnabled?: boolean;
       taskType?: TaskType;
       modelOverride?: string;
+      compareModels?: string[];
       onTitleGenerated?: (title: string) => void;
     }) => {
       if (!conversationId || !content.trim()) return;
@@ -120,28 +122,6 @@ export function useChat(
         }
       }
 
-      // Create placeholder assistant message
-      const assistantId = generateId();
-      const placeholderMessage: Message = {
-        id: assistantId,
-        conversationId,
-        role: 'assistant',
-        content: '',
-        model: activeModel,
-        researchMode: shouldUseResearch,
-        agentMode: agentEnabled === true,
-        taskType,
-        searchResults: searchResults?.results?.map((r) => ({
-          title: r.title,
-          url: r.url,
-          snippet: r.snippet,
-        })),
-        timestamp: Date.now(),
-      };
-
-      setMessages((prev) => [...prev, placeholderMessage]);
-      setIsStreaming(true);
-
       // Prepare messages for API
       const currentMessages = await storage.getMessages(conversationId);
       const apiMessages = currentMessages.map((m) => ({
@@ -151,124 +131,183 @@ export function useChat(
           : m.content,
       }));
 
-      let streamDisplay: StreamingDisplay | null = null;
+      const runModels = uniqueModels(compareModels?.length ? compareModels : [activeModel]);
+      let firstResponseContent = '';
+      setIsStreaming(true);
+      abortRef.current = new AbortController();
 
       try {
-        abortRef.current = new AbortController();
-        const requestStartedAt = Date.now();
-        let fullContent = '';
-        let finalModel = activeModel;
-        streamDisplay = createStreamingDisplay(assistantId, () => finalModel, setMessages);
-
-        const response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
-          },
-          body: JSON.stringify({
-            messages: apiMessages,
-            model: activeModel,
-            availableModels: models
-              .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
-              .map((item) => item.id),
-            systemPrompt: systemPrompt || undefined,
-            searchResults: searchResults?.results,
-            attachments,
+        for (const runModel of runModels) {
+          let streamDisplay: StreamingDisplay | null = null;
+          const assistantId = generateId();
+          const placeholderMessage: Message = {
+            id: assistantId,
+            conversationId,
+            role: 'assistant',
+            content: '',
+            model: runModel,
             researchMode: shouldUseResearch,
             agentMode: agentEnabled === true,
             taskType,
-          }),
-          signal: abortRef.current.signal,
-        });
+            compareRun: runModels.length > 1,
+            searchResults: searchResults?.results?.map((r) => ({
+              title: r.title,
+              url: r.url,
+              snippet: r.snippet,
+            })),
+            timestamp: Date.now(),
+          };
 
-        if (!response.ok || !response.body) {
-          throw await readChatError(response, 'Failed to send message');
-        }
+          setMessages((prev) => [...prev, placeholderMessage]);
 
-        // Stream the response
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('No response stream');
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-        const recordedFallbackFailures = new Set<string>();
-        const processLine = (line: string) => {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith('data: ')) return;
           try {
-            const data = JSON.parse(trimmed.slice(6));
-            if (data.model) {
-              finalModel = data.model;
+            const requestStartedAt = Date.now();
+            let fullContent = '';
+            let finalModel = runModel;
+            streamDisplay = createStreamingDisplay(assistantId, () => finalModel, setMessages);
+
+            const response = await fetch('/api/chat', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
+              },
+              body: JSON.stringify({
+                messages: apiMessages,
+                model: runModel,
+                availableModels: models
+                  .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
+                  .map((item) => item.id),
+                systemPrompt: systemPrompt || undefined,
+                searchResults: searchResults?.results,
+                attachments,
+                researchMode: shouldUseResearch,
+                agentMode: agentEnabled === true,
+                taskType,
+              }),
+              signal: abortRef.current.signal,
+            });
+
+            if (!response.ok || !response.body) {
+              throw await readChatError(response, 'Failed to send message');
             }
-            if (data.content) {
-              fullContent += data.content;
-              streamDisplay?.append(data.content);
-            }
-            const rateLimitedModels = normalizeStringArray(data.rateLimitedModels);
-            if (rateLimitedModels.length > 0) {
-              onModelsRateLimited?.(
-                rateLimitedModels,
-                typeof data.retryAfterSeconds === 'number' ? data.retryAfterSeconds : undefined,
-                taskType
-              );
-              for (const failedModel of rateLimitedModels) {
-                recordedFallbackFailures.add(failedModel);
+
+            const reader = response.body?.getReader();
+            if (!reader) throw new Error('No response stream');
+
+            const decoder = new TextDecoder();
+            let buffer = '';
+            const recordedFallbackFailures = new Set<string>();
+            const processLine = (line: string) => {
+              const trimmed = line.trim();
+              if (!trimmed || !trimmed.startsWith('data: ')) return;
+              try {
+                const data = JSON.parse(trimmed.slice(6));
+                if (data.model) {
+                  finalModel = data.model;
+                }
+                if (data.content) {
+                  fullContent += data.content;
+                  streamDisplay?.append(data.content);
+                }
+                const rateLimitedModels = normalizeStringArray(data.rateLimitedModels);
+                if (rateLimitedModels.length > 0) {
+                  onModelsRateLimited?.(
+                    rateLimitedModels,
+                    typeof data.retryAfterSeconds === 'number' ? data.retryAfterSeconds : undefined,
+                    taskType
+                  );
+                  for (const failedModel of rateLimitedModels) {
+                    recordedFallbackFailures.add(failedModel);
+                  }
+                }
+                for (const failedModel of normalizeStringArray(data.failedModels)) {
+                  if (recordedFallbackFailures.has(failedModel)) continue;
+                  recordedFallbackFailures.add(failedModel);
+                  onModelOutcome?.({ modelId: failedModel, taskType, outcome: 'failure' });
+                }
+              } catch {
+                // skip malformed
+              }
+            };
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                processLine(line);
               }
             }
-            for (const failedModel of normalizeStringArray(data.failedModels)) {
-              if (recordedFallbackFailures.has(failedModel)) continue;
-              recordedFallbackFailures.add(failedModel);
-              onModelOutcome?.({ modelId: failedModel, taskType, outcome: 'failure' });
+            buffer += decoder.decode();
+            if (buffer.trim()) {
+              processLine(buffer);
             }
-          } catch {
-            // skip malformed
+
+            if (!fullContent.trim()) {
+              throw new Error('The model returned an empty response. Please try again.');
+            }
+
+            await streamDisplay?.finish(fullContent);
+            if (!firstResponseContent) firstResponseContent = fullContent;
+
+            await storage.addMessage(conversationId, {
+              role: 'assistant',
+              content: fullContent,
+              model: finalModel,
+              researchMode: shouldUseResearch,
+              agentMode: agentEnabled === true,
+              taskType,
+              compareRun: runModels.length > 1,
+              searchResults: placeholderMessage.searchResults,
+            });
+            onModelOutcome?.({
+              modelId: finalModel,
+              taskType,
+              outcome: 'success',
+              latencyMs: Date.now() - requestStartedAt,
+            });
+
+            const updatedMessages = await storage.getMessages(conversationId);
+            setMessages(updatedMessages);
+          } catch (err) {
+            streamDisplay?.cancel();
+            if ((err as Error).name === 'AbortError') {
+              setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+              return;
+            }
+            const errorMessage = (err as Error).message || 'Failed to get response';
+            const details = parseChatErrorDetails(err);
+            if (details.rateLimitedModels.length > 0) {
+              onModelsRateLimited?.(details.rateLimitedModels, details.retryAfterSeconds, taskType);
+            } else {
+              onModelOutcome?.({ modelId: runModel, taskType, outcome: 'failure' });
+            }
+            setError(errorMessage);
+            const storedError = await storage.addMessage(conversationId, {
+              role: 'assistant',
+              content: errorMessage,
+              model: runModel,
+              researchMode: shouldUseResearch,
+              agentMode: agentEnabled === true,
+              taskType,
+              compareRun: runModels.length > 1,
+              searchResults: placeholderMessage.searchResults,
+              isError: true,
+            });
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? storedError
+                  : m
+              )
+            );
           }
-        };
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            processLine(line);
-          }
         }
-        buffer += decoder.decode();
-        if (buffer.trim()) {
-          processLine(buffer);
-        }
-
-        if (!fullContent.trim()) {
-          throw new Error('The model returned an empty response. Please try again.');
-        }
-
-        await streamDisplay?.finish(fullContent);
-
-        // Save the complete assistant message
-        await storage.addMessage(conversationId, {
-          role: 'assistant',
-          content: fullContent,
-          model: finalModel,
-          researchMode: shouldUseResearch,
-          agentMode: agentEnabled === true,
-          taskType,
-          searchResults: placeholderMessage.searchResults,
-        });
-        onModelOutcome?.({
-          modelId: finalModel,
-          taskType,
-          outcome: 'success',
-          latencyMs: Date.now() - requestStartedAt,
-        });
-
-        // Remove the placeholder and reload from DB for consistency
-        const updatedMessages = await storage.getMessages(conversationId);
-        setMessages(updatedMessages);
 
         // Generate title if this is the first exchange
         if (currentMessages.length <= 1 && onTitleGenerated) {
@@ -286,7 +325,7 @@ export function useChat(
               body: JSON.stringify({
                 messages: [
                   { role: 'user', content: withAttachmentCue(content.trim(), attachments) },
-                  { role: 'assistant', content: fullContent.slice(0, 500) },
+                  { role: 'assistant', content: firstResponseContent.slice(0, 500) },
                 ],
                 model: activeModel,
                 generateTitleFor: true,
@@ -301,38 +340,6 @@ export function useChat(
             // Title generation failure is non-critical
           }
         }
-      } catch (err) {
-        streamDisplay?.cancel();
-        if ((err as Error).name === 'AbortError') {
-          setMessages((prev) => prev.filter((m) => m.id !== assistantId));
-          return;
-        }
-        const errorMessage = (err as Error).message || 'Failed to get response';
-        const details = parseChatErrorDetails(err);
-        if (details.rateLimitedModels.length > 0) {
-          onModelsRateLimited?.(details.rateLimitedModels, details.retryAfterSeconds, taskType);
-        } else {
-          onModelOutcome?.({ modelId: activeModel, taskType, outcome: 'failure' });
-        }
-        setError(errorMessage);
-        const storedError = await storage.addMessage(conversationId, {
-          role: 'assistant',
-          content: errorMessage,
-          model: activeModel,
-          researchMode: shouldUseResearch,
-          agentMode: agentEnabled === true,
-          taskType,
-          searchResults: placeholderMessage.searchResults,
-          isError: true,
-        });
-        // Update the placeholder with error state
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? storedError
-              : m
-          )
-        );
       } finally {
         setIsStreaming(false);
         abortRef.current = null;
@@ -626,6 +633,10 @@ function parseChatErrorDetails(error: unknown): {
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
+
+function uniqueModels(models: string[]): string[] {
+  return Array.from(new Set(models.filter((modelId) => modelId.trim().length > 0)));
 }
 
 function buildLocalTitle(content: string): string {

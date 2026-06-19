@@ -318,6 +318,10 @@ export function AppShell() {
               const safeRoutedModel = routedModel
                 ? resolveSafeModelId(routedModel, models)
                 : undefined;
+              const primaryModel = safeRoutedModel || selectedModel;
+              const compareModel = args.compareEnabled
+                ? pickCompareModel(models, reliability, effectiveTaskType, primaryModel)?.id
+                : undefined;
 
               if (safeRoutedModel && safeRoutedModel !== selectedModel) {
                 setSelectedModel(safeRoutedModel);
@@ -330,6 +334,7 @@ export function AppShell() {
                 ...args,
                 taskType: effectiveTaskType,
                 modelOverride: safeRoutedModel,
+                compareModels: compareModel ? [primaryModel, compareModel] : undefined,
                 searchEnabled: effectiveSearchEnabled,
                 researchEnabled: effectiveResearchEnabled,
                 agentEnabled: args.agentEnabled ?? agentEnabled,
@@ -395,4 +400,26 @@ export function AppShell() {
       </div>
     </TooltipProvider>
   );
+}
+
+function pickCompareModel(
+  models: Parameters<typeof recommendModelForTask>[0],
+  reliability: Parameters<typeof recommendModelForTask>[1],
+  taskType: Parameters<typeof recommendModelForTask>[2],
+  primaryModel: string
+) {
+  const recommended = recommendModelForTask(models, reliability, taskType);
+  if (recommended && recommended.id !== primaryModel && !isCoolingDown(recommended)) {
+    return recommended;
+  }
+
+  return models.find((model) =>
+    model.isFree &&
+    model.id !== primaryModel &&
+    !isCoolingDown(model)
+  );
+}
+
+function isCoolingDown(model: { cooldownUntil?: number }): boolean {
+  return Boolean(model.cooldownUntil && model.cooldownUntil > Date.now());
 }

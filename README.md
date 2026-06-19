@@ -2,7 +2,7 @@
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ffayzkk889%2Fopenconvo&env=OPENROUTER_API_KEY,OPENCONVO_HOSTED_FREE_DAILY_LIMIT,TAVILY_API_KEY,OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT,NEXT_PUBLIC_GITHUB_URL&envDescription=OpenConvo%20uses%20OpenRouter%20for%20hosted%20free%20mode%2C%20Tavily%20for%20optional%20search%2C%20and%20a%20public%20GitHub%20URL%20for%20landing%20page%20links.&envLink=https%3A%2F%2Fgithub.com%2Ffayzkk889%2Fopenconvo%2Fblob%2Fmain%2FDEPLOYMENT.md)
 
-OpenConvo is a local-first, open-source AI chat workspace. It is designed for people who want a ChatGPT/Claude-style interface they can run themselves, with free OpenRouter models, optional web search, file context, projects, prompt snippets, memory, and exportable local data.
+OpenConvo is a local-first, open-source AI chat workspace. It is designed for people who want a ChatGPT/Claude-style interface they can run themselves, with free OpenRouter models, automatic web research, file context, projects, prompt snippets, memory, and exportable local data.
 
 Repository: https://github.com/fayzkk889/openconvo
 
@@ -18,7 +18,7 @@ The public site has two surfaces:
 - Free-model-first OpenRouter integration with dynamic model discovery, `:free` filtering, and request-level zero-price enforcement.
 - Streaming chat with fallback across curated free models when a provider is temporarily rate limited.
 - Hosted free mode with server-side shared OpenRouter capacity and a daily per-visitor limit.
-- Automatic web research with a lightweight keyless fallback and optional Tavily quality boost.
+- Automatic web research with provider fallback: Tavily, optional SearxNG, then lightweight keyless DuckDuckGo.
 - File uploads for text, markdown, code, JSON, CSV, and PDF context.
 - Projects with custom instructions and optional project default models.
 - Conversation title generation based on the first exchange.
@@ -82,12 +82,13 @@ Edit `.env.local` if you want server-side keys. You can also leave it blank and 
 OPENROUTER_API_KEY=sk-or-v1-your-key
 OPENCONVO_HOSTED_FREE_DAILY_LIMIT=20
 TAVILY_API_KEY=tvly-your-key
+SEARXNG_URL=https://your-searxng-instance.example
 OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT=5
 NEXT_PUBLIC_GITHUB_URL=https://github.com/your-name/openconvo
 NEXT_PUBLIC_SITE_URL=https://openconvo.vercel.app
 ```
 
-`OPENROUTER_API_KEY` is required for chat unless supplied in Settings. `TAVILY_API_KEY` is optional; OpenConvo can use lightweight keyless search when it is not set.
+`OPENROUTER_API_KEY` is required for chat unless supplied in Settings. `TAVILY_API_KEY` and `SEARXNG_URL` are optional; OpenConvo can use lightweight keyless search when neither is set.
 When `OPENROUTER_API_KEY` is set on a public deployment, visitors without their own key can use hosted free mode. `OPENCONVO_HOSTED_FREE_DAILY_LIMIT` controls the per-visitor daily limit for that shared mode.
 Visitors can try hosted web search even without Tavily. `OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT` controls the per-visitor daily search limit. Users who add their own Tavily key in Settings bypass the hosted search cap and use Tavily directly.
 `NEXT_PUBLIC_GITHUB_URL` is optional and only controls the GitHub link on the landing page.

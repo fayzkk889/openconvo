@@ -69,8 +69,12 @@ if (hasValue('NEXT_PUBLIC_SITE_URL') && !validUrl(process.env.NEXT_PUBLIC_SITE_U
   failures.push('NEXT_PUBLIC_SITE_URL must be a valid https URL.');
 }
 
-if (!hasValue('TAVILY_API_KEY')) {
-  warnings.push('TAVILY_API_KEY is not set. Web search will require users to add their own key in Settings.');
+if (!hasValue('TAVILY_API_KEY') && !hasValue('SEARXNG_URL')) {
+  warnings.push('No Tavily key or SearxNG URL is set. Hosted search will use the lightweight keyless fallback.');
+}
+
+if (hasValue('SEARXNG_URL') && !validUrl(process.env.SEARXNG_URL)) {
+  failures.push('SEARXNG_URL must be a valid https URL.');
 }
 
 if (failures.length > 0) {

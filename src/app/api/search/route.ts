@@ -52,7 +52,10 @@ export async function POST(request: NextRequest) {
         hostedSearchUsage: publicHostedSearchUsage(committedQuota),
       },
       {
-        headers: hostedSearchHeaders(committedQuota.mode, committedQuota),
+        headers: {
+          ...hostedSearchHeaders(committedQuota.mode, committedQuota),
+          'X-OpenConvo-Search-Provider': results.provider || 'unknown',
+        },
       }
     );
   } catch (error) {

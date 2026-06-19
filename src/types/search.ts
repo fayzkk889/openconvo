@@ -9,4 +9,6 @@ export interface SearchResponse {
   query: string;
   results: SearchResult[];
   answer?: string;
+  provider?: string;
+  providerErrors?: string[];
 }

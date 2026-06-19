@@ -69,6 +69,8 @@ export function useChat(
       taskType,
       modelOverride,
       compareModels,
+      autoRouted,
+      routingNote,
       onTitleGenerated,
     }: {
       content: string;
@@ -79,6 +81,8 @@ export function useChat(
       taskType?: TaskType;
       modelOverride?: string;
       compareModels?: string[];
+      autoRouted?: boolean;
+      routingNote?: string;
       onTitleGenerated?: (title: string) => void;
     }) => {
       if (!conversationId || !content.trim()) return;
@@ -150,6 +154,8 @@ export function useChat(
             researchMode: shouldUseResearch,
             agentMode: agentEnabled === true,
             taskType,
+            autoRouted,
+            routingNote,
             compareRun: runModels.length > 1,
             searchResults: searchResults?.results?.map((r) => ({
               title: r.title,
@@ -263,6 +269,8 @@ export function useChat(
               researchMode: shouldUseResearch,
               agentMode: agentEnabled === true,
               taskType,
+              autoRouted,
+              routingNote,
               compareRun: runModels.length > 1,
               searchResults: placeholderMessage.searchResults,
             });
@@ -296,6 +304,8 @@ export function useChat(
               researchMode: shouldUseResearch,
               agentMode: agentEnabled === true,
               taskType,
+              autoRouted,
+              routingNote,
               compareRun: runModels.length > 1,
               searchResults: placeholderMessage.searchResults,
               isError: true,
@@ -387,6 +397,8 @@ export function useChat(
         researchMode: targetMessage.researchMode,
         agentMode: targetMessage.agentMode,
         taskType: targetMessage.taskType,
+        autoRouted: targetMessage.autoRouted,
+        routingNote: targetMessage.routingNote,
         searchResults: targetMessage.searchResults,
         timestamp: Date.now(),
       };
@@ -504,6 +516,8 @@ export function useChat(
           researchMode: targetMessage.researchMode,
           agentMode: targetMessage.agentMode,
           taskType: targetMessage.taskType,
+          autoRouted: targetMessage.autoRouted,
+          routingNote: targetMessage.routingNote,
           searchResults: targetMessage.searchResults,
         });
         onModelOutcome?.({
@@ -536,6 +550,8 @@ export function useChat(
           researchMode: targetMessage.researchMode,
           agentMode: targetMessage.agentMode,
           taskType: targetMessage.taskType,
+          autoRouted: targetMessage.autoRouted,
+          routingNote: targetMessage.routingNote,
           searchResults: targetMessage.searchResults,
           isError: true,
         });

@@ -14,6 +14,7 @@ import type { AIModel } from '@/types/models';
 import type { ModelReliability } from '@/types/models';
 import type { PromptSnippet } from '@/types/settings';
 import { TASK_PRESETS } from '@/lib/tasks';
+import type { WorkflowStarterDraft } from '@/lib/workflow-starters';
 
 type ChatAccessMode = 'hosted-free' | 'byok' | 'missing-key';
 
@@ -44,6 +45,8 @@ interface ComposerProps {
   hostedSearchAvailable: boolean;
   hostedSearchDailyLimit: number;
   modelReliability: ModelReliability[];
+  workflowDraft?: WorkflowStarterDraft | null;
+  onWorkflowDraftApplied?: () => void;
 }
 
 export function Composer({
@@ -65,6 +68,8 @@ export function Composer({
   hostedSearchAvailable,
   hostedSearchDailyLimit,
   modelReliability,
+  workflowDraft,
+  onWorkflowDraftApplied,
 }: ComposerProps) {
   const [content, setContent] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -123,6 +128,16 @@ export function Composer({
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (!workflowDraft) return;
+    setContent(workflowDraft.starter.prompt);
+    setTaskType(workflowDraft.starter.taskType);
+    setCompareEnabled(Boolean(workflowDraft.starter.compareEnabled));
+    setAttachments([]);
+    onWorkflowDraftApplied?.();
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [onWorkflowDraftApplied, workflowDraft]);
 
   return (
     <div className="w-full">

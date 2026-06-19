@@ -25,6 +25,8 @@ export interface Message {
   researchMode?: boolean;
   agentMode?: boolean;
   taskType?: TaskType;
+  autoRouted?: boolean;
+  routingNote?: string;
   compareRun?: boolean;
   preferred?: boolean;
   isError?: boolean;

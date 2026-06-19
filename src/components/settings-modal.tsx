@@ -20,6 +20,8 @@ interface SettingsModalProps {
   models: AIModel[];
   modelReliability: ModelReliability[];
   onClearData: () => void;
+  onClearModelReliability: () => void;
+  onExportModelReliability: () => void;
   onExport: () => void;
   onImport: (file: File) => void;
 }
@@ -34,12 +36,15 @@ export function SettingsModal({
   models,
   modelReliability,
   onClearData,
+  onClearModelReliability,
+  onExportModelReliability,
   onExport,
   onImport,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<Tab>('general');
   const [modelTaskFilter, setModelTaskFilter] = useState('auto');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showClearModelLearningConfirm, setShowClearModelLearningConfirm] = useState(false);
   const [selectedSnippetId, setSelectedSnippetId] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -336,6 +341,33 @@ export function SettingsModal({
                         OpenConvo learns from successful responses, rate limits, failures, and compare preferences in this browser only.
                       </p>
                     </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={onExportModelReliability}
+                        disabled={modelReliability.length === 0}
+                      >
+                        <Download size={15} />
+                        Export
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowClearModelLearningConfirm(true)}
+                        disabled={modelReliability.length === 0}
+                      >
+                        <Trash2 size={15} />
+                        Reset
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-[var(--color-text-tertiary)]">
+                      {modelReliability.length === 0
+                        ? 'No local model results recorded yet.'
+                        : `${modelReliability.length} local model-task records saved.`}
+                    </p>
                     <select
                       value={modelTaskFilter}
                       onChange={(event) => setModelTaskFilter(event.target.value)}
@@ -605,6 +637,18 @@ export function SettingsModal({
           onClearData();
           setShowClearConfirm(false);
           onOpenChange(false);
+        }}
+      />
+      <ConfirmDialog
+        open={showClearModelLearningConfirm}
+        onOpenChange={setShowClearModelLearningConfirm}
+        title="Reset Model Learning?"
+        description="This clears local model scores, rate-limit history, and compare preferences in this browser. Your conversations, files, settings, and keys stay untouched."
+        confirmLabel="Reset learning"
+        variant="danger"
+        onConfirm={() => {
+          onClearModelReliability();
+          setShowClearModelLearningConfirm(false);
         }}
       />
     </>

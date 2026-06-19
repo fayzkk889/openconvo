@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { TaskType } from '@/types/chat';
 import type { ModelReliability } from '@/types/models';
-import { getModelReliability, recordModelOutcome, recordModelPreference } from '@/lib/storage';
+import {
+  clearModelReliability,
+  getModelReliability,
+  recordModelOutcome,
+  recordModelPreference,
+} from '@/lib/storage';
 
 export function useModelReliability() {
   const [reliability, setReliability] = useState<ModelReliability[]>([]);
@@ -71,8 +76,19 @@ export function useModelReliability() {
     []
   );
 
+  const clearReliability = useCallback(async () => {
+    try {
+      await clearModelReliability();
+      setReliability([]);
+    } catch (err) {
+      console.error('Failed to clear model reliability:', err);
+      throw err;
+    }
+  }, []);
+
   return {
     reliability,
+    clearReliability,
     recordOutcome,
     recordRateLimitedModels,
     recordPreference,

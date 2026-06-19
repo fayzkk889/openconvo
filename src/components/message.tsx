@@ -108,6 +108,15 @@ export function Message({
                 Agent
               </span>
             )}
+            {isAssistant && message.autoRouted && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-text-tertiary)]"
+                title={message.routingNote || 'OpenConvo inferred the task and routing.'}
+              >
+                <Route className="h-3 w-3" />
+                Auto routed
+              </span>
+            )}
             {isAssistant && message.compareRun && (
               <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-text-tertiary)]">
                 <GitCompare className="h-3 w-3" />

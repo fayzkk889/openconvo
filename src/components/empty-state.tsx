@@ -2,13 +2,16 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { ArrowRight, CheckCircle2, FileText, Globe, Key, Sparkles, Workflow, X } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Code2, FileText, GitCompare, Globe, Key, PenLine, Sparkles, Workflow, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import type { WorkflowStarter } from '@/lib/workflow-starters';
+import { WORKFLOW_STARTERS } from '@/lib/workflow-starters';
 
 type ChatAccessMode = 'hosted-free' | 'byok' | 'missing-key';
 
 interface EmptyStateProps {
   onCreateNew: () => void;
+  onStartWorkflow: (starter: WorkflowStarter) => void;
   showSetupCard: boolean;
   hasTavilyKey: boolean;
   onOpenSettings: () => void;
@@ -37,6 +40,7 @@ const features = [
 
 export function EmptyState({
   onCreateNew,
+  onStartWorkflow,
   showSetupCard,
   hasTavilyKey,
   onOpenSettings,
@@ -80,6 +84,37 @@ export function EmptyState({
             Start a conversation
             <ArrowRight className="h-4 w-4" />
           </Button>
+        </div>
+
+        <div className="mx-auto mt-5 w-full max-w-3xl sm:mt-6">
+          <div className="mb-3 flex items-center justify-between gap-3 text-left">
+            <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-tertiary)]">
+              Workflow starters
+            </h2>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {WORKFLOW_STARTERS.map((starter) => {
+              const Icon = getStarterIcon(starter.id);
+              return (
+                <button
+                  key={starter.id}
+                  type="button"
+                  onClick={() => onStartWorkflow(starter)}
+                  className="group flex min-h-[104px] min-w-0 flex-col rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3 text-left shadow-sm transition-colors hover:border-[var(--color-border-light)] hover:bg-[var(--color-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+                >
+                  <span className="mb-3 flex h-8 w-8 items-center justify-center rounded-md bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)]">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span className="text-sm font-semibold text-[var(--color-text-primary)]">
+                    {starter.title}
+                  </span>
+                  <span className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--color-text-secondary)]">
+                    {starter.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {showSetupCard && (
@@ -162,4 +197,21 @@ export function EmptyState({
       </div>
     </div>
   );
+}
+
+function getStarterIcon(id: string) {
+  switch (id) {
+    case 'research-brief':
+      return Globe;
+    case 'file-analysis':
+      return FileText;
+    case 'code-review':
+      return Code2;
+    case 'compare-models':
+      return GitCompare;
+    case 'rewrite':
+      return PenLine;
+    default:
+      return Workflow;
+  }
 }

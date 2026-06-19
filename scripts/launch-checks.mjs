@@ -26,6 +26,8 @@ const useDeploymentConfig = read('src/hooks/use-deployment-config.ts');
 const appShell = read('src/components/app-shell.tsx');
 const sidebar = read('src/components/sidebar.tsx');
 const emptyState = read('src/components/empty-state.tsx');
+const composer = read('src/components/composer.tsx');
+const workflowStarters = read('src/lib/workflow-starters.ts');
 const layout = read('src/app/layout.tsx');
 const ogImage = read('src/app/opengraph-image.tsx');
 const globals = read('src/app/globals.css');
@@ -72,6 +74,9 @@ check('empty state has mobile and short viewport rules', /empty-features/.test(g
 check('chat streaming uses display smoothing', /createStreamingDisplay/.test(useChat) && /takeStreamingChunk/.test(useChat));
 check('active conversation survives refresh', /openconvo\.activeConversationId/.test(useConversations) && /getStoredConversationId/.test(useConversations) && /if \(loading\) return/.test(useConversations));
 check('deployment config gates first render', /loaded:\s*false/.test(useDeploymentConfig) && /deploymentConfig\.loaded/.test(appShell));
+check('workflow starters are rendered on empty state', /WORKFLOW_STARTERS/.test(emptyState) && /onStartWorkflow/.test(emptyState));
+check('workflow starters create editable composer drafts', /workflowDraft/.test(composer) && /setContent\(workflowDraft\.starter\.prompt\)/.test(composer));
+check('workflow starter prompts cover core task modes', /research-brief/.test(workflowStarters) && /file-analysis/.test(workflowStarters) && /code-review/.test(workflowStarters) && /compare-models/.test(workflowStarters));
 check('test script is wired', packageJson.scripts?.test === 'node scripts/launch-checks.mjs');
 check('.env.example documents OpenRouter', /OPENROUTER_API_KEY/.test(envExample));
 check('.env.example documents Tavily', /TAVILY_API_KEY/.test(envExample));

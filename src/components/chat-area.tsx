@@ -13,6 +13,7 @@ import { Button } from './ui/button';
 import { ChevronDown, FileCode2, Gauge } from 'lucide-react';
 import { useArtifacts } from '@/hooks/use-artifacts';
 import { estimateContextUsage, formatTokenCount } from '@/lib/context-usage';
+import type { WorkflowStarter, WorkflowStarterDraft } from '@/lib/workflow-starters';
 
 type ChatAccessMode = 'hosted-free' | 'byok' | 'missing-key';
 
@@ -37,6 +38,7 @@ interface ChatAreaProps {
   agentEnabled: boolean;
   onToggleAgent: () => void;
   onCreateNew: () => void;
+  onStartWorkflow: (starter: WorkflowStarter) => void;
   showSetupCard: boolean;
   hasTavilyKey: boolean;
   onOpenSettings: () => void;
@@ -47,6 +49,8 @@ interface ChatAreaProps {
   hostedSearchAvailable: boolean;
   hostedSearchDailyLimit: number;
   modelReliability: ModelReliability[];
+  workflowDraft?: WorkflowStarterDraft | null;
+  onWorkflowDraftApplied?: () => void;
 }
 
 export function ChatArea({
@@ -70,6 +74,7 @@ export function ChatArea({
   agentEnabled,
   onToggleAgent,
   onCreateNew,
+  onStartWorkflow,
   showSetupCard,
   hasTavilyKey,
   onOpenSettings,
@@ -80,6 +85,8 @@ export function ChatArea({
   hostedSearchAvailable,
   hostedSearchDailyLimit,
   modelReliability,
+  workflowDraft,
+  onWorkflowDraftApplied,
 }: ChatAreaProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -131,6 +138,7 @@ export function ChatArea({
     return (
       <EmptyState
         onCreateNew={onCreateNew}
+        onStartWorkflow={onStartWorkflow}
         showSetupCard={showSetupCard}
         hasTavilyKey={hasTavilyKey}
         onOpenSettings={onOpenSettings}
@@ -260,6 +268,8 @@ export function ChatArea({
             hostedSearchAvailable={hostedSearchAvailable && !hasTavilyKey}
             hostedSearchDailyLimit={hostedSearchDailyLimit}
             modelReliability={modelReliability}
+            workflowDraft={workflowDraft?.conversationId === conversationId ? workflowDraft : null}
+            onWorkflowDraftApplied={onWorkflowDraftApplied}
           />
         </div>
       </div>

@@ -13,8 +13,9 @@ import { useModelReliability } from '@/hooks/use-model-reliability';
 import { downloadExport, importFromFile } from '@/lib/export';
 import { clearAllData } from '@/lib/storage';
 import { resolveSafeModelId } from '@/lib/models';
-import { inferTaskType } from '@/lib/tasks';
+import { TASK_PRESETS, inferTaskType } from '@/lib/tasks';
 import { recommendModelForTask } from '@/lib/model-reliability';
+import type { WorkflowStarter, WorkflowStarterDraft } from '@/lib/workflow-starters';
 
 import { Sidebar } from './sidebar';
 import { ChatArea } from './chat-area';
@@ -29,6 +30,7 @@ export function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [workflowDraft, setWorkflowDraft] = useState<WorkflowStarterDraft | null>(null);
 
   const { settings, loaded: settingsLoaded, updateSettings, resetSettings } = useSettings();
   const deploymentConfig = useDeploymentConfig();
@@ -43,12 +45,14 @@ export function AppShell() {
     agentEnabled,
     setSearchEnabled,
     setResearchEnabled,
+    setAgentEnabled,
     toggleSearch,
     toggleResearch,
     toggleAgent,
   } = useSearch();
   const {
     reliability,
+    clearReliability,
     recordOutcome,
     recordRateLimitedModels,
     recordPreference,
@@ -176,6 +180,38 @@ export function AppShell() {
     updateSettings(updates);
   };
 
+  const handleClearModelReliability = async () => {
+    try {
+      await clearReliability();
+      addToast('Model learning has been reset', 'success');
+    } catch {
+      addToast('Could not reset model learning', 'error');
+    }
+  };
+
+  const handleExportModelReliability = () => {
+    if (reliability.length === 0) {
+      addToast('No model learning data to export yet', 'info');
+      return;
+    }
+
+    const payload = {
+      type: 'openconvo-model-report',
+      exportedAt: new Date().toISOString(),
+      records: reliability,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `openconvo-model-report-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    addToast('Model report exported', 'success');
+  };
+
   const handleToggleSearch = () => {
     const next = !searchEnabled;
     toggleSearch();
@@ -218,7 +254,26 @@ export function AppShell() {
   const handleCreateNew = async () => {
     const modelForConversation = resolveSafeModelId(activeProject?.defaultModel || selectedModel, models);
     setSelectedModel(modelForConversation);
-    await createNew(modelForConversation);
+    return createNew(modelForConversation);
+  };
+
+  const handleStartWorkflow = async (starter: WorkflowStarter) => {
+    const conversation = await handleCreateNew();
+    if (starter.searchEnabled) {
+      setSearchEnabled(true);
+      updateSettings({ searchEnabled: true });
+    }
+    if (starter.researchEnabled) {
+      setResearchEnabled(true);
+      setSearchEnabled(true);
+      updateSettings({ searchEnabled: true });
+    }
+    setAgentEnabled(false);
+    setWorkflowDraft({
+      id: `${conversation.id}:${starter.id}:${Date.now()}`,
+      conversationId: conversation.id,
+      starter,
+    });
   };
 
   const handleSelectModel = (modelId: string) => {
@@ -310,7 +365,7 @@ export function AppShell() {
                   searchEnabled: effectiveSearchEnabled,
                   researchEnabled: effectiveResearchEnabled,
                 })
-                : args.taskType;
+                : args.taskType || 'auto';
               const hasLocalSignal = reliability.some((item) =>
                 item.taskType === effectiveTaskType &&
                 item.successes + item.failures + item.rateLimits > 0
@@ -322,6 +377,14 @@ export function AppShell() {
                 ? resolveSafeModelId(routedModel, models)
                 : undefined;
               const primaryModel = safeRoutedModel || selectedModel;
+              const routingNote = shouldAutoRoute
+                ? buildRoutingNote({
+                  taskType: effectiveTaskType,
+                  selectedModel,
+                  routedModel: safeRoutedModel,
+                  hasLocalSignal,
+                })
+                : undefined;
               const compareModel = args.compareEnabled
                 ? pickCompareModel(models, reliability, effectiveTaskType, primaryModel)?.id
                 : undefined;
@@ -338,6 +401,8 @@ export function AppShell() {
                 taskType: effectiveTaskType,
                 modelOverride: safeRoutedModel,
                 compareModels: compareModel ? [primaryModel, compareModel] : undefined,
+                autoRouted: shouldAutoRoute,
+                routingNote,
                 searchEnabled: effectiveSearchEnabled,
                 researchEnabled: effectiveResearchEnabled,
                 agentEnabled: args.agentEnabled ?? agentEnabled,
@@ -360,6 +425,7 @@ export function AppShell() {
             agentEnabled={agentEnabled}
             onToggleAgent={toggleAgent}
             onCreateNew={handleCreateNew}
+            onStartWorkflow={handleStartWorkflow}
             showSetupCard={!settings.onboardingDismissed}
             hasTavilyKey={Boolean(settings.tavilyApiKey)}
             onOpenSettings={() => setSettingsOpen(true)}
@@ -370,6 +436,8 @@ export function AppShell() {
             hostedSearchAvailable={deploymentConfig.hostedSearchAvailable}
             hostedSearchDailyLimit={deploymentConfig.hostedSearchDailyLimit}
             modelReliability={reliability}
+            workflowDraft={workflowDraft}
+            onWorkflowDraftApplied={() => setWorkflowDraft(null)}
           />
         </main>
 
@@ -381,6 +449,8 @@ export function AppShell() {
           models={models}
           modelReliability={reliability}
           onClearData={handleClearData}
+          onClearModelReliability={handleClearModelReliability}
+          onExportModelReliability={handleExportModelReliability}
           onExport={() => downloadExport(settings)}
           onImport={handleImport}
         />
@@ -427,4 +497,25 @@ function pickCompareModel(
 
 function isCoolingDown(model: { cooldownUntil?: number }): boolean {
   return Boolean(model.cooldownUntil && model.cooldownUntil > Date.now());
+}
+
+function buildRoutingNote({
+  taskType,
+  selectedModel,
+  routedModel,
+  hasLocalSignal,
+}: {
+  taskType: string;
+  selectedModel: string;
+  routedModel?: string;
+  hasLocalSignal: boolean;
+}): string {
+  const taskLabel = TASK_PRESETS.find((task) => task.id === taskType)?.shortLabel || taskType;
+  if (routedModel && routedModel !== selectedModel) {
+    return `Auto detected ${taskLabel} and selected ${routedModel} using local model reliability.`;
+  }
+  if (hasLocalSignal) {
+    return `Auto detected ${taskLabel} and kept the current model based on local reliability.`;
+  }
+  return `Auto detected ${taskLabel}; the current model was kept until local reliability data is available.`;
 }

@@ -216,6 +216,11 @@ export async function getModelReliability(): Promise<ModelReliability[]> {
   return db.getAll('modelReliability');
 }
 
+export async function clearModelReliability(): Promise<void> {
+  const db = await getDB();
+  await db.clear('modelReliability');
+}
+
 export async function recordModelOutcome({
   modelId,
   taskType,

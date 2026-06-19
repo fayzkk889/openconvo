@@ -3,6 +3,8 @@ export interface SearchResult {
   url: string;
   snippet: string;
   content?: string;
+  extracted?: boolean;
+  fetchedAt?: number;
 }
 
 export interface SearchResponse {

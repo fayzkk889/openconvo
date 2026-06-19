@@ -290,6 +290,9 @@ function normalizeImportedSearchResults(value: unknown): SearchResultRef[] | und
       title: result.title.slice(0, 200),
       url: result.url.slice(0, 1000),
       snippet: result.snippet.slice(0, 1000),
+      content: typeof result.content === 'string' ? result.content.slice(0, 5000) : undefined,
+      extracted: typeof result.extracted === 'boolean' ? result.extracted : undefined,
+      fetchedAt: typeof result.fetchedAt === 'number' ? result.fetchedAt : undefined,
     }];
   });
 

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { searchWeb } from '@/lib/search';
+import { enrichSearchResults } from '@/lib/web-extract';
 
 type SearchUsageMode = 'byok' | 'hosted-search';
 
@@ -43,12 +44,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const results = await searchWeb(trimmedQuery, key, mode === 'research' ? 'research' : 'search');
+    const searchMode = mode === 'research' ? 'research' : 'search';
+    const results = await searchWeb(trimmedQuery, key, searchMode);
+    const enrichedResults = await enrichSearchResults(results.results, {
+      maxPages: searchMode === 'research' ? 5 : 2,
+    });
     const committedQuota = commitHostedSearchQuota(hostedQuota);
 
     return Response.json(
       {
         ...results,
+        results: enrichedResults,
         hostedSearchUsage: publicHostedSearchUsage(committedQuota),
       },
       {

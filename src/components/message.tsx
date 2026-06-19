@@ -255,6 +255,11 @@ export function Message({
                         <span className="text-[10px] text-[var(--color-text-tertiary)] truncate">
                           {getSourceDomain(source.url) || source.url}
                         </span>
+                        {source.extracted && (
+                          <span className="mt-1 w-fit rounded-full border border-[var(--color-success)]/30 bg-[var(--color-success)]/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-success)]">
+                            Opened page
+                          </span>
+                        )}
                         {source.snippet && (
                           <p className="mt-1.5 text-xs text-[var(--color-text-secondary)] line-clamp-2 leading-relaxed">
                             {source.snippet}

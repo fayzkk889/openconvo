@@ -76,3 +76,5 @@ After deployment:
 ## Current Limitation
 
 Hosted free chat and hosted search use in-memory daily quotas. That is acceptable for an early launch, but serverless deployments can reset memory between instances. For serious traffic, move rate limiting to a persistent service such as Upstash Redis or Vercel KV.
+
+Web research fetches a limited number of public HTTP(S) pages for readable text extraction. Local/private network hosts are blocked and fetched content is capped before it is sent to models.

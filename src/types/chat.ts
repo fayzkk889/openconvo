@@ -10,6 +10,9 @@ export interface SearchResultRef {
   title: string;
   url: string;
   snippet: string;
+  content?: string;
+  extracted?: boolean;
+  fetchedAt?: number;
 }
 
 export type TaskType = 'auto' | 'quick' | 'research' | 'file' | 'code' | 'writing';

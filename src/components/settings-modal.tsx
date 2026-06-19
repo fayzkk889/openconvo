@@ -2,13 +2,15 @@
 
 import React, { useState, useRef } from 'react';
 import { Settings as SettingsType } from '@/types/settings';
-import { AIModel } from '@/types/models';
+import { AIModel, ModelReliability } from '@/types/models';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { ConfirmDialog } from './confirm-dialog';
-import { Brain, Library, Moon, Sun, Download, Upload, Trash2, Monitor, Palette, Database, Cpu, Key, Plus } from 'lucide-react';
+import { Brain, Library, Moon, Sun, Download, Upload, Trash2, Monitor, Palette, Database, Cpu, Key, Plus, BarChart3 } from 'lucide-react';
+import { TASK_PRESETS, normalizeTaskType } from '@/lib/tasks';
+import { getReliabilitySignal } from '@/lib/model-reliability';
 
 interface SettingsModalProps {
   open: boolean;
@@ -16,12 +18,13 @@ interface SettingsModalProps {
   settings: SettingsType;
   onUpdateSettings: (updates: Partial<SettingsType>) => void;
   models: AIModel[];
+  modelReliability: ModelReliability[];
   onClearData: () => void;
   onExport: () => void;
   onImport: (file: File) => void;
 }
 
-type Tab = 'general' | 'keys' | 'memory' | 'prompts' | 'system' | 'data' | 'about';
+type Tab = 'general' | 'keys' | 'models' | 'memory' | 'prompts' | 'system' | 'data' | 'about';
 
 export function SettingsModal({
   open,
@@ -29,11 +32,13 @@ export function SettingsModal({
   settings,
   onUpdateSettings,
   models,
+  modelReliability,
   onClearData,
   onExport,
   onImport,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<Tab>('general');
+  const [modelTaskFilter, setModelTaskFilter] = useState('auto');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [selectedSnippetId, setSelectedSnippetId] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -125,6 +130,17 @@ export function SettingsModal({
               API Keys
             </button>
             <button
+              onClick={() => setActiveTab('models')}
+              className={`flex shrink-0 items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                activeTab === 'models' 
+                  ? 'bg-[var(--color-bg-active)] text-[var(--color-text-primary)]' 
+                  : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'
+              }`}
+            >
+              <BarChart3 size={16} />
+              Models
+            </button>
+            <button
               onClick={() => setActiveTab('memory')}
               className={`flex shrink-0 items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                 activeTab === 'memory' 
@@ -186,6 +202,7 @@ export function SettingsModal({
             <DialogTitle className="mb-6 text-2xl font-semibold tracking-tight">
               {activeTab === 'general' && 'General Settings'}
               {activeTab === 'keys' && 'API Keys'}
+              {activeTab === 'models' && 'Model Report Cards'}
               {activeTab === 'memory' && 'Memory'}
               {activeTab === 'system' && 'System Prompt'}
               {activeTab === 'prompts' && 'Prompt Library'}
@@ -305,6 +322,76 @@ export function SettingsModal({
                     Required for web search. Get your free key at <a href="https://tavily.com" target="_blank" rel="noreferrer" className="text-[var(--color-accent)] hover:underline">tavily.com</a>.
                     If left blank, the app will try to use the server's environment variable.
                   </p>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'models' && (
+              <div className="space-y-5 animate-fade-in">
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Local model learning</h3>
+                      <p className="mt-1 text-xs leading-5 text-[var(--color-text-tertiary)]">
+                        OpenConvo learns from successful responses, rate limits, failures, and compare preferences in this browser only.
+                      </p>
+                    </div>
+                    <select
+                      value={modelTaskFilter}
+                      onChange={(event) => setModelTaskFilter(event.target.value)}
+                      className="h-9 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 text-sm text-[var(--color-text-primary)] outline-none"
+                      aria-label="Model report task"
+                    >
+                      {TASK_PRESETS.map((task) => (
+                        <option key={task.id} value={task.id}>
+                          {task.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {rankModelsForTask(models, modelReliability, modelTaskFilter).map(({ model, signal, stats }) => (
+                    <div key={model.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{model.name}</h3>
+                            {signal.recommended && (
+                              <span className="rounded-full border border-[var(--color-success)]/30 bg-[var(--color-success)]/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-success)]">
+                                Recommended
+                              </span>
+                            )}
+                            {model.cooldownUntil && model.cooldownUntil > Date.now() && (
+                              <span className="rounded-full bg-[var(--color-warning)]/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-warning)]">
+                                Cooling down
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-1 truncate text-xs text-[var(--color-text-tertiary)]">{model.id}</p>
+                          <p className="mt-2 text-xs leading-5 text-[var(--color-text-secondary)]">{signal.detail}</p>
+                        </div>
+                        <div className="text-left sm:text-right">
+                          <div className="text-2xl font-semibold text-[var(--color-text-primary)]">{signal.score}</div>
+                          <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-tertiary)]">Score</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                        <Metric label="Success" value={stats?.successes || 0} />
+                        <Metric label="Failures" value={stats?.failures || 0} />
+                        <Metric label="Rate limits" value={stats?.rateLimits || 0} />
+                        <Metric label="Picked" value={stats?.preferenceWins || 0} />
+                      </div>
+                    </div>
+                  ))}
+
+                  {models.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-8 text-center text-sm text-[var(--color-text-secondary)]">
+                      No models available yet.
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -528,4 +615,24 @@ function formatContextLength(contextLength: number): string {
   if (contextLength >= 1000000) return `${(contextLength / 1000000).toFixed(1)}M`;
   if (contextLength >= 1000) return `${Math.round(contextLength / 1000)}k`;
   return String(contextLength);
+}
+
+function rankModelsForTask(models: AIModel[], reliability: ModelReliability[], taskType: string) {
+  const normalizedTask = normalizeTaskType(taskType);
+  return models
+    .map((model) => {
+      const stats = reliability.find((item) => item.modelId === model.id && item.taskType === normalizedTask);
+      const signal = getReliabilitySignal(model, reliability, normalizedTask, models);
+      return { model, stats, signal };
+    })
+    .sort((a, b) => b.signal.score - a.signal.score);
+}
+
+function Metric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2">
+      <div className="text-sm font-semibold text-[var(--color-text-primary)]">{value}</div>
+      <div className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-tertiary)]">{label}</div>
+    </div>
+  );
 }

@@ -379,6 +379,7 @@ export function AppShell() {
           settings={settings}
           onUpdateSettings={handleUpdateSettings}
           models={models}
+          modelReliability={reliability}
           onClearData={handleClearData}
           onExport={() => downloadExport(settings)}
           onImport={handleImport}

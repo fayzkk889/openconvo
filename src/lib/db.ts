@@ -1,8 +1,9 @@
 import { openDB, IDBPDatabase } from 'idb';
 import { Artifact, Conversation, Message, Project } from '@/types/chat';
+import { ModelReliability } from '@/types/models';
 
 const DB_NAME = 'openconvo';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 interface OpenConvoDB {
   projects: {
@@ -24,6 +25,11 @@ interface OpenConvoDB {
     key: string;
     value: Artifact;
     indexes: { 'by-conversation': string; 'by-project': string };
+  };
+  modelReliability: {
+    key: string;
+    value: ModelReliability;
+    indexes: { 'by-model': string; 'by-task': string };
   };
 }
 
@@ -60,6 +66,19 @@ export function getDB(): Promise<IDBPDatabase<OpenConvoDB>> {
           }
           if (!artifactStore.indexNames.contains('by-project')) {
             artifactStore.createIndex('by-project', 'projectId');
+          }
+        }
+        if (!db.objectStoreNames.contains('modelReliability')) {
+          const reliabilityStore = db.createObjectStore('modelReliability', { keyPath: 'id' });
+          reliabilityStore.createIndex('by-model', 'modelId');
+          reliabilityStore.createIndex('by-task', 'taskType');
+        } else {
+          const reliabilityStore = transaction.objectStore('modelReliability');
+          if (!reliabilityStore.indexNames.contains('by-model')) {
+            reliabilityStore.createIndex('by-model', 'modelId');
+          }
+          if (!reliabilityStore.indexNames.contains('by-task')) {
+            reliabilityStore.createIndex('by-task', 'taskType');
           }
         }
       },

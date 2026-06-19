@@ -9,6 +9,7 @@ import { useSettings } from '@/hooks/use-settings';
 import { useDeploymentConfig } from '@/hooks/use-deployment-config';
 import { useToast } from '@/hooks/use-toast';
 import { useSearch } from '@/hooks/use-search';
+import { useModelReliability } from '@/hooks/use-model-reliability';
 import { downloadExport, importFromFile } from '@/lib/export';
 import { clearAllData } from '@/lib/storage';
 import { resolveSafeModelId } from '@/lib/models';
@@ -44,6 +45,11 @@ export function AppShell() {
     toggleResearch,
     toggleAgent,
   } = useSearch();
+  const {
+    reliability,
+    recordOutcome,
+    recordRateLimitedModels,
+  } = useModelReliability();
 
   const {
     conversations,
@@ -93,7 +99,11 @@ export function AppShell() {
     settings?.openrouterApiKey,
     settings?.tavilyApiKey,
     models,
-    markModelsCoolingDown
+    (modelIds, retryAfterSeconds, taskType) => {
+      markModelsCoolingDown(modelIds, retryAfterSeconds);
+      recordRateLimitedModels(modelIds, taskType);
+    },
+    recordOutcome
   );
 
   // Auto-close sidebar on mobile when a conversation is selected
@@ -317,6 +327,7 @@ export function AppShell() {
             hostedFreeDailyLimit={deploymentConfig.hostedFreeDailyLimit}
             hostedSearchAvailable={deploymentConfig.hostedSearchAvailable}
             hostedSearchDailyLimit={deploymentConfig.hostedSearchDailyLimit}
+            modelReliability={reliability}
           />
         </main>
 

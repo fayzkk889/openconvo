@@ -3,6 +3,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Message, Attachment, Conversation, TaskType } from '@/types/chat';
 import { AIModel } from '@/types/models';
+import type { ModelReliability } from '@/types/models';
 import { PromptSnippet } from '@/types/settings';
 import { Message as MessageComponent } from './message';
 import { Composer } from './composer';
@@ -44,6 +45,7 @@ interface ChatAreaProps {
   hostedFreeDailyLimit: number;
   hostedSearchAvailable: boolean;
   hostedSearchDailyLimit: number;
+  modelReliability: ModelReliability[];
 }
 
 export function ChatArea({
@@ -75,6 +77,7 @@ export function ChatArea({
   hostedFreeDailyLimit,
   hostedSearchAvailable,
   hostedSearchDailyLimit,
+  modelReliability,
 }: ChatAreaProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -253,6 +256,7 @@ export function ChatArea({
             hostedFreeDailyLimit={hostedFreeDailyLimit}
             hostedSearchAvailable={hostedSearchAvailable && !hasTavilyKey}
             hostedSearchDailyLimit={hostedSearchDailyLimit}
+            modelReliability={modelReliability}
           />
         </div>
       </div>

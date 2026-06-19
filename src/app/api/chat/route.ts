@@ -87,6 +87,7 @@ export async function POST(request: NextRequest) {
     const rateLimitedModels: string[] = [];
     const providerRateLimits = new Map<string, number>();
     const skippedModels = modelsToTry.filter((tryModel) => isModelCoolingDown(tryModel));
+    let retryAfterSeconds: number | undefined;
 
     for (const tryModel of modelsToTry) {
       if (isModelCoolingDown(tryModel)) {
@@ -121,6 +122,14 @@ export async function POST(request: NextRequest) {
           async start(controller) {
             let buffer = '';
             const encoder = new TextEncoder();
+            if (failedModels.length > 0 || rateLimitedModels.length > 0) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                model: usedModel,
+                failedModels,
+                rateLimitedModels,
+                retryAfterSeconds,
+              })}\n\n`));
+            }
             const emitSseLine = (line: string) => {
               const trimmed = line.trim();
               if (!trimmed || !trimmed.startsWith('data: ')) return;
@@ -177,6 +186,7 @@ export async function POST(request: NextRequest) {
         failedModels.push(tryModel);
         if (err instanceof OpenRouterError && err.status === 429) {
           rateLimitedModels.push(tryModel);
+          retryAfterSeconds = err.retryAfterSeconds || retryAfterSeconds;
           rememberModelCooldown(tryModel, err);
           console.warn(`Model ${tryModel} rate-limited; trying fallback.`);
           if (err.providerName) {

@@ -1,7 +1,9 @@
 import { getDB } from './db';
-import { Artifact, Conversation, Message, Project } from '@/types/chat';
+import { Artifact, Conversation, Message, Project, TaskType } from '@/types/chat';
+import { ModelReliability } from '@/types/models';
 import { generateId } from './utils';
 import { DEFAULT_MODEL_ID } from './models';
+import { normalizeTaskType } from './tasks';
 
 // ---- Conversations ----
 
@@ -207,6 +209,59 @@ export async function deleteArtifact(id: string): Promise<void> {
   await db.delete('artifacts', id);
 }
 
+// ---- Local model reliability ----
+
+export async function getModelReliability(): Promise<ModelReliability[]> {
+  const db = await getDB();
+  return db.getAll('modelReliability');
+}
+
+export async function recordModelOutcome({
+  modelId,
+  taskType,
+  outcome,
+  latencyMs = 0,
+}: {
+  modelId: string;
+  taskType?: TaskType;
+  outcome: ModelReliability['lastOutcome'];
+  latencyMs?: number;
+}): Promise<ModelReliability> {
+  const db = await getDB();
+  const normalizedTask = normalizeTaskType(taskType);
+  const id = modelReliabilityId(modelId, normalizedTask);
+  const existing = await db.get('modelReliability', id);
+  const now = Date.now();
+  const next: ModelReliability = {
+    id,
+    modelId,
+    taskType: normalizedTask,
+    successes: existing?.successes || 0,
+    failures: existing?.failures || 0,
+    rateLimits: existing?.rateLimits || 0,
+    totalLatencyMs: existing?.totalLatencyMs || 0,
+    lastOutcome: outcome,
+    lastUsedAt: now,
+    updatedAt: now,
+  };
+
+  if (outcome === 'success') {
+    next.successes += 1;
+    next.totalLatencyMs += Math.max(Math.floor(latencyMs), 0);
+  } else if (outcome === 'rate_limited') {
+    next.rateLimits += 1;
+  } else {
+    next.failures += 1;
+  }
+
+  await db.put('modelReliability', next);
+  return next;
+}
+
+function modelReliabilityId(modelId: string, taskType: TaskType): string {
+  return `${taskType}:${modelId}`;
+}
+
 // ---- Bulk operations ----
 
 export async function clearAllData(): Promise<void> {
@@ -215,6 +270,7 @@ export async function clearAllData(): Promise<void> {
   await db.clear('conversations');
   await db.clear('messages');
   await db.clear('artifacts');
+  await db.clear('modelReliability');
 }
 
 export async function exportAllData(): Promise<{ projects: Project[]; conversations: Conversation[]; messages: Message[]; artifacts: Artifact[] }> {

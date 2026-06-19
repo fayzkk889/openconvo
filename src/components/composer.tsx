@@ -11,6 +11,7 @@ import { AgentToggle } from '@/components/agent-toggle';
 import { ModelSelector } from '@/components/model-selector';
 import type { Attachment, TaskType } from '@/types/chat';
 import type { AIModel } from '@/types/models';
+import type { ModelReliability } from '@/types/models';
 import type { PromptSnippet } from '@/types/settings';
 import { TASK_PRESETS } from '@/lib/tasks';
 
@@ -41,6 +42,7 @@ interface ComposerProps {
   hostedFreeDailyLimit: number;
   hostedSearchAvailable: boolean;
   hostedSearchDailyLimit: number;
+  modelReliability: ModelReliability[];
 }
 
 export function Composer({
@@ -61,6 +63,7 @@ export function Composer({
   hostedFreeDailyLimit,
   hostedSearchAvailable,
   hostedSearchDailyLimit,
+  modelReliability,
 }: ComposerProps) {
   const [content, setContent] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -211,6 +214,8 @@ export function Composer({
               models={models}
               selectedModel={selectedModel}
               onSelect={onSelectModel}
+              taskType={taskType}
+              reliability={modelReliability}
               compact
             />
           </div>

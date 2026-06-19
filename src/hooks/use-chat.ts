@@ -24,7 +24,13 @@ export function useChat(
   openrouterApiKey?: string,
   tavilyApiKey?: string,
   models: AIModel[] = [],
-  onModelsRateLimited?: (modelIds: string[], retryAfterSeconds?: number) => void
+  onModelsRateLimited?: (modelIds: string[], retryAfterSeconds?: number, taskType?: TaskType) => void,
+  onModelOutcome?: (outcome: {
+    modelId: string;
+    taskType?: TaskType;
+    outcome: 'success' | 'failure' | 'rate_limited';
+    latencyMs?: number;
+  }) => void
 ) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -146,6 +152,7 @@ export function useChat(
 
       try {
         abortRef.current = new AbortController();
+        const requestStartedAt = Date.now();
         let fullContent = '';
         let finalModel = model;
         streamDisplay = createStreamingDisplay(assistantId, () => finalModel, setMessages);
@@ -182,6 +189,7 @@ export function useChat(
 
         const decoder = new TextDecoder();
         let buffer = '';
+        const recordedFallbackFailures = new Set<string>();
         const processLine = (line: string) => {
           const trimmed = line.trim();
           if (!trimmed || !trimmed.startsWith('data: ')) return;
@@ -193,6 +201,22 @@ export function useChat(
             if (data.content) {
               fullContent += data.content;
               streamDisplay?.append(data.content);
+            }
+            const rateLimitedModels = normalizeStringArray(data.rateLimitedModels);
+            if (rateLimitedModels.length > 0) {
+              onModelsRateLimited?.(
+                rateLimitedModels,
+                typeof data.retryAfterSeconds === 'number' ? data.retryAfterSeconds : undefined,
+                taskType
+              );
+              for (const failedModel of rateLimitedModels) {
+                recordedFallbackFailures.add(failedModel);
+              }
+            }
+            for (const failedModel of normalizeStringArray(data.failedModels)) {
+              if (recordedFallbackFailures.has(failedModel)) continue;
+              recordedFallbackFailures.add(failedModel);
+              onModelOutcome?.({ modelId: failedModel, taskType, outcome: 'failure' });
             }
           } catch {
             // skip malformed
@@ -231,6 +255,12 @@ export function useChat(
           agentMode: agentEnabled === true,
           taskType,
           searchResults: placeholderMessage.searchResults,
+        });
+        onModelOutcome?.({
+          modelId: finalModel,
+          taskType,
+          outcome: 'success',
+          latencyMs: Date.now() - requestStartedAt,
         });
 
         // Remove the placeholder and reload from DB for consistency
@@ -277,7 +307,9 @@ export function useChat(
         const errorMessage = (err as Error).message || 'Failed to get response';
         const details = parseChatErrorDetails(err);
         if (details.rateLimitedModels.length > 0) {
-          onModelsRateLimited?.(details.rateLimitedModels, details.retryAfterSeconds);
+          onModelsRateLimited?.(details.rateLimitedModels, details.retryAfterSeconds, taskType);
+        } else {
+          onModelOutcome?.({ modelId: model, taskType, outcome: 'failure' });
         }
         setError(errorMessage);
         const storedError = await storage.addMessage(conversationId, {
@@ -303,7 +335,7 @@ export function useChat(
         abortRef.current = null;
       }
     },
-    [conversationId, model, systemPrompt, openrouterApiKey, tavilyApiKey, models, onModelsRateLimited]
+    [conversationId, model, systemPrompt, openrouterApiKey, tavilyApiKey, models, onModelsRateLimited, onModelOutcome]
   );
 
   const stopStreaming = useCallback(() => {
@@ -355,6 +387,7 @@ export function useChat(
 
       try {
         abortRef.current = new AbortController();
+        const requestStartedAt = Date.now();
         let fullContent = '';
         let finalModel = model;
         streamDisplay = createStreamingDisplay(assistantId, () => finalModel, setMessages);
@@ -396,6 +429,7 @@ export function useChat(
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        const recordedFallbackFailures = new Set<string>();
         const processLine = (line: string) => {
           const trimmed = line.trim();
           if (!trimmed || !trimmed.startsWith('data: ')) return;
@@ -407,6 +441,22 @@ export function useChat(
             if (data.content) {
               fullContent += data.content;
               streamDisplay?.append(data.content);
+            }
+            const rateLimitedModels = normalizeStringArray(data.rateLimitedModels);
+            if (rateLimitedModels.length > 0) {
+              onModelsRateLimited?.(
+                rateLimitedModels,
+                typeof data.retryAfterSeconds === 'number' ? data.retryAfterSeconds : undefined,
+                targetMessage.taskType
+              );
+              for (const failedModel of rateLimitedModels) {
+                recordedFallbackFailures.add(failedModel);
+              }
+            }
+            for (const failedModel of normalizeStringArray(data.failedModels)) {
+              if (recordedFallbackFailures.has(failedModel)) continue;
+              recordedFallbackFailures.add(failedModel);
+              onModelOutcome?.({ modelId: failedModel, taskType: targetMessage.taskType, outcome: 'failure' });
             }
           } catch {
             // skip malformed
@@ -445,6 +495,12 @@ export function useChat(
           taskType: targetMessage.taskType,
           searchResults: targetMessage.searchResults,
         });
+        onModelOutcome?.({
+          modelId: finalModel,
+          taskType: targetMessage.taskType,
+          outcome: 'success',
+          latencyMs: Date.now() - requestStartedAt,
+        });
 
         const updatedMessages = await storage.getMessages(conversationId);
         setMessages(updatedMessages);
@@ -457,7 +513,9 @@ export function useChat(
         const errorMessage = (err as Error).message || 'Failed to regenerate message';
         const details = parseChatErrorDetails(err);
         if (details.rateLimitedModels.length > 0) {
-          onModelsRateLimited?.(details.rateLimitedModels, details.retryAfterSeconds);
+          onModelsRateLimited?.(details.rateLimitedModels, details.retryAfterSeconds, targetMessage.taskType);
+        } else {
+          onModelOutcome?.({ modelId: model, taskType: targetMessage.taskType, outcome: 'failure' });
         }
         setError(errorMessage);
         const storedError = await storage.addMessage(conversationId, {
@@ -482,7 +540,7 @@ export function useChat(
         abortRef.current = null;
       }
     },
-    [conversationId, messages, model, systemPrompt, openrouterApiKey, models, onModelsRateLimited]
+    [conversationId, messages, model, systemPrompt, openrouterApiKey, models, onModelsRateLimited, onModelOutcome]
   );
 
   const removeMessage = useCallback(
@@ -560,6 +618,11 @@ function parseChatErrorDetails(error: unknown): {
     };
   }
   return { rateLimitedModels: [] };
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
 }
 
 function buildLocalTitle(content: string): string {

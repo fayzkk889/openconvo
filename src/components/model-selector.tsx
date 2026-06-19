@@ -11,13 +11,17 @@ import {
   DropdownLabel,
 } from '@/components/ui/dropdown';
 import { Button } from '@/components/ui/button';
-import type { AIModel } from '@/types/models';
+import type { TaskType } from '@/types/chat';
+import type { AIModel, ModelReliability } from '@/types/models';
+import { getReliabilitySignal } from '@/lib/model-reliability';
 
 interface ModelSelectorProps {
   models: AIModel[];
   selectedModel: string;
   onSelect: (modelId: string) => void;
   compact?: boolean;
+  taskType?: TaskType;
+  reliability?: ModelReliability[];
 }
 
 export function ModelSelector({
@@ -25,6 +29,8 @@ export function ModelSelector({
   selectedModel,
   onSelect,
   compact = false,
+  taskType,
+  reliability = [],
 }: ModelSelectorProps) {
   const currentModel = models.find((model) => model.id === selectedModel);
   const activeModels = models.filter((model) => !isCoolingDown(model));
@@ -56,6 +62,7 @@ export function ModelSelector({
                 <ModelOption
                   model={model}
                   selected={model.id === selectedModel}
+                  reliability={getReliabilitySignal(model, reliability, taskType, activeModels)}
                 />
               </DropdownItem>
             ))}
@@ -75,7 +82,11 @@ export function ModelSelector({
                     onClick={() => undefined}
                     className="cursor-not-allowed justify-between opacity-50"
                   >
-                    <ModelOption model={model} coolingDown />
+                    <ModelOption
+                      model={model}
+                      coolingDown
+                      reliability={getReliabilitySignal(model, reliability, taskType, activeModels)}
+                    />
                   </DropdownItem>
                 ))}
               </React.Fragment>
@@ -97,10 +108,12 @@ function ModelOption({
   model,
   selected = false,
   coolingDown = false,
+  reliability,
 }: {
   model: AIModel;
   selected?: boolean;
   coolingDown?: boolean;
+  reliability?: ReturnType<typeof getReliabilitySignal>;
 }) {
   return (
     <>
@@ -116,8 +129,17 @@ function ModelOption({
               Verified free
             </span>
           ) : null}
+          {!coolingDown && reliability?.recommended && (
+            <span className="shrink-0 rounded-full border border-[var(--color-success)]/30 bg-[var(--color-success)]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-success)]">
+              Recommended
+            </span>
+          )}
         </span>
-        {model.description && (
+        {reliability && reliability.samples > 0 ? (
+          <span className="truncate text-xs text-[var(--color-text-tertiary)]">
+            {reliability.detail}
+          </span>
+        ) : model.description && (
           <span className="truncate text-xs text-[var(--color-text-tertiary)]">
             {model.description}
           </span>

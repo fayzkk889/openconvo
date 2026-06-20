@@ -164,7 +164,7 @@ function isObviouslyLocalOrPersonal(text: string): boolean {
   return /\b(my file|attached|attachment|this document|my code|this code|above text|my note|my notes|rewrite this|summarize this)\b/.test(text);
 }
 
-function isCasualGreeting(text: string): boolean {
+export function isCasualGreeting(text: string): boolean {
   return /^(hi+|hii+|hey+|hello+|yo+|sup)(?:\s+(?:there|again|friend|bro|buddy))?[\s!.?]*$|^(thanks?|thank you|ok|okay|hmm|lol)[\s!.?]*$/i.test(text.trim());
 }
 

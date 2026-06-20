@@ -10,6 +10,7 @@ import { generateId } from '@/lib/utils';
 import { buildResearchFallbackAnswer } from '@/lib/research-fallback';
 import { ensureResearchCitations } from '@/lib/research-citations';
 import { buildConversationTitle } from '@/lib/title';
+import { isCasualGreeting } from '@/lib/tasks';
 
 const STREAM_FLUSH_MS = 18;
 const STREAM_FINISH_BUDGET_MS = 900;
@@ -111,6 +112,22 @@ export function useChat(
       });
 
       setMessages((prev) => [...prev, userMessage]);
+
+      if (isCasualGreeting(content)) {
+        const assistantMessage = await storage.addMessage(conversationId, {
+          role: 'assistant',
+          content: 'Hey! How can I help?',
+          model: activeModel,
+          researchMode: false,
+          agentMode: false,
+          taskType: 'quick',
+          autoRouted,
+          routingNote,
+        });
+        setMessages((prev) => [...prev, assistantMessage]);
+        if (onTitleGenerated) onTitleGenerated('Greeting');
+        return;
+      }
 
       // Perform web search if enabled
       let searchResults: SearchResponse | null = null;

@@ -139,6 +139,7 @@ check('chat stream stalls are bounded and recoverable', /CHAT_STREAM_IDLE_TIMEOU
 check('client search and title requests have timeouts', /SEARCH_REQUEST_TIMEOUT_MS/.test(useChat) && /TITLE_REQUEST_TIMEOUT_MS/.test(useChat) && /fetchWithTimeout/.test(useChat));
 check('research retries progressively shrink context', /RESEARCH_RETRY_SOURCE_LIMITS/.test(useChat) && /compactSearchResultsForAttempt/.test(useChat) && /MAX_SOURCE_CONTENT_CHARS/.test(prompts) && /MAX_SEARCH_CONTENT_CHARS/.test(chatRoute));
 check('quick tasks bypass external search even when toggles are on', /isQuickTask/.test(useChat) && /!isQuickTask && \(searchEnabled \|\| researchEnabled \|\| isResearchTask\)/.test(useChat));
+check('casual greetings use a local reply without model search', /isCasualGreeting\(content\)/.test(useChat) && /Hey! How can I help\?/.test(useChat) && /return;/.test(useChat));
 check('local conversation titles are summarized, not raw first prompts', /buildConversationTitle/.test(titleLib) && /buildComparisonTitle/.test(titleLib) && /buildPurchaseTitle/.test(titleLib) && /buildFeatureTitle/.test(titleLib) && /buildConversationTitle/.test(useChat) && /buildConversationTitle/.test(openrouter) && !/function buildLocalTitle/.test(useChat));
 check('research reports are extracted as artifacts', /extractResearchReportArtifact/.test(artifactsLib) && /Research Evidence/.test(artifactsLib));
 check('artifacts can be exported directly', /handleDownload/.test(read('src/components/artifact-panel.tsx')) && /artifactExtension/.test(read('src/components/artifact-panel.tsx')));

@@ -10,7 +10,7 @@ import { Composer } from './composer';
 import { EmptyState } from './empty-state';
 import { ArtifactPanel } from './artifact-panel';
 import { Button } from './ui/button';
-import { ChevronDown, FileCode2, Gauge } from 'lucide-react';
+import { ChevronDown, FileText, Gauge } from 'lucide-react';
 import { useArtifacts } from '@/hooks/use-artifacts';
 import { estimateContextUsage, formatTokenCount } from '@/lib/context-usage';
 import type { WorkflowStarter, WorkflowStarterDraft } from '@/lib/workflow-starters';
@@ -159,10 +159,10 @@ export function ChatArea({
       {artifacts.length > 0 && (
         <button
           onClick={() => setArtifactsOpen(true)}
-          className="absolute right-4 top-4 z-10 hidden items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-xs font-medium text-[var(--color-text-secondary)] shadow-lg transition-colors hover:border-[var(--color-border-light)] hover:text-[var(--color-text-primary)] lg:flex"
+          className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-xs font-medium text-[var(--color-text-secondary)] shadow-lg transition-colors hover:border-[var(--color-border-light)] hover:text-[var(--color-text-primary)]"
           aria-label="Open artifacts"
         >
-          <FileCode2 className="h-4 w-4" />
+          <FileText className="h-4 w-4" />
           Artifacts
           <span className="rounded-full bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 text-[10px]">
             {artifacts.length}

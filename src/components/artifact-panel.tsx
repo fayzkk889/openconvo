@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, Copy, FileCode2, Save, Trash2, X } from 'lucide-react';
+import { Check, Copy, FileText, Save, Trash2, X } from 'lucide-react';
 import { Artifact } from '@/types/chat';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -61,11 +61,11 @@ export function ArtifactPanel({ artifacts, open, onClose, onUpdate, onDelete }: 
   };
 
   return (
-    <aside className="absolute bottom-0 right-0 top-0 z-20 hidden w-[420px] border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)] shadow-2xl shadow-black/30 lg:flex lg:flex-col">
+    <aside className="absolute bottom-0 right-0 top-0 z-20 flex w-full flex-col border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)] shadow-2xl shadow-black/30 sm:w-[420px]">
       <div className="flex h-14 items-center justify-between border-b border-[var(--color-border)] px-4">
         <div className="flex items-center gap-2">
-          <FileCode2 className="h-4 w-4 text-[var(--color-text-secondary)]" />
-          <span className="text-sm font-semibold text-[var(--color-text-primary)]">Canvas</span>
+          <FileText className="h-4 w-4 text-[var(--color-text-secondary)]" />
+          <span className="text-sm font-semibold text-[var(--color-text-primary)]">Artifacts</span>
           <span className="rounded-full bg-[var(--color-bg-tertiary)] px-2 py-0.5 text-xs text-[var(--color-text-tertiary)]">
             {artifacts.length}
           </span>

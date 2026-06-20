@@ -19,6 +19,7 @@ const searchLib = read('src/lib/search.ts');
 const webExtract = read('src/lib/web-extract.ts');
 const researchPlanner = read('src/lib/research-planner.ts');
 const sourceQuality = read('src/lib/source-quality.ts');
+const artifactsLib = read('src/lib/artifacts.ts');
 const prompts = read('src/lib/prompts.ts');
 const db = read('src/lib/db.ts');
 const exportLib = read('src/lib/export.ts');
@@ -74,6 +75,7 @@ check('research trace is saved on messages', /researchTrace/.test(useChat) && /b
 check('research trace renders in source panel', /Research trace/.test(messageComponent) && /plannedQueries/.test(messageComponent));
 check('search results are quality ranked', /rankSearchResults/.test(searchLib) && /sourceScore/.test(sourceQuality));
 check('source quality is exposed to prompts and UI', /Quality:/.test(prompts) && /sourceLabel/.test(messageComponent));
+check('research reports are extracted as artifacts', /extractResearchReportArtifact/.test(artifactsLib) && /Research Evidence/.test(artifactsLib));
 check('database migration repairs artifact indexes', /artifactStore\.indexNames\.contains\('by-project'\)/.test(db));
 check('imports repair unsafe model ids', /resolveSafeModelId/.test(exportLib));
 check('imports cap large text fields', /MAX_MESSAGE_CHARS/.test(exportLib) && /MAX_ARTIFACT_CHARS/.test(exportLib));

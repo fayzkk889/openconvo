@@ -22,7 +22,7 @@ The public site has two surfaces:
 - File uploads for text, markdown, code, JSON, CSV, and PDF context.
 - Projects with custom instructions and optional project default models.
 - Conversation title generation based on the first exchange.
-- Canvas/artifact panel for extracted assistant code blocks.
+- Canvas/artifact panel for extracted assistant code blocks and saved research reports.
 - Import/export for conversations, projects, messages, artifacts, and safe settings.
 - Prompt library, local memory, pinned/archived chats, command palette, and collapsible sidebar.
 

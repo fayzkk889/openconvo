@@ -11,6 +11,7 @@ const MAX_MESSAGES = 100;
 const MAX_MESSAGE_CHARS = 50000;
 const MAX_CONTEXT_ITEMS = 10;
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 30 * 1000;
+const CHAT_STREAM_IDLE_TIMEOUT_MS = 25 * 1000;
 
 const modelCooldowns = new Map<string, number>();
 const hostedUsage = new Map<string, { count: number; resetAt: number }>();
@@ -123,6 +124,7 @@ export async function POST(request: NextRequest) {
           async start(controller) {
             let buffer = '';
             let emittedContent = '';
+            let controllerErrored = false;
             const encoder = new TextEncoder();
             if (failedModels.length > 0 || rateLimitedModels.length > 0) {
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({
@@ -152,7 +154,7 @@ export async function POST(request: NextRequest) {
 
             try {
               while (true) {
-                const { done, value } = await reader.read();
+                const { done, value } = await readStreamChunkWithTimeout(reader, CHAT_STREAM_IDLE_TIMEOUT_MS);
                 if (done) break;
 
                 buffer += decoder.decode(value, { stream: true });
@@ -176,9 +178,29 @@ export async function POST(request: NextRequest) {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: fallback, model: usedModel, fallback: true })}\n\n`));
               }
             } catch (err) {
-              controller.error(err);
+              await reader.cancel().catch(() => undefined);
+              if (researchMode && searchResults?.length) {
+                const fallback = buildResearchFallbackAnswer({
+                  question: lastUserQuestion(messages),
+                  sources: searchResults,
+                  reason: emittedContent.trim()
+                    ? 'the selected free model stopped streaming before it finished'
+                    : 'the selected free model did not stream a response in time',
+                });
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: emittedContent.trim() ? `\n\n${fallback}` : fallback, model: usedModel, fallback: true })}\n\n`));
+              } else {
+                controllerErrored = true;
+                controller.error(err);
+              }
             } finally {
-              controller.close();
+              try {
+                reader.releaseLock();
+              } catch {
+                // The upstream reader may already be released/cancelled after a timeout.
+              }
+              if (!controllerErrored) {
+                controller.close();
+              }
             }
           },
         });
@@ -238,6 +260,23 @@ export async function POST(request: NextRequest) {
       { error: message },
       { status }
     );
+  }
+}
+
+async function readStreamChunkWithTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('Chat stream timed out waiting for model output')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 

@@ -2,6 +2,7 @@ import { AIModel } from '@/types/models';
 import { CURATED_FREE_MODELS, FALLBACK_CHAIN, isFreeModelId } from './models';
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
+const OPENROUTER_REQUEST_TIMEOUT_MS = 45 * 1000;
 const FREE_ONLY_PROVIDER_OPTIONS = {
   sort: 'price',
   max_price: {
@@ -117,16 +118,12 @@ export async function streamChat(
   }
   allMessages.push(...messages);
 
-  const response = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: getHeaders(apiKey),
-    body: JSON.stringify({
-      model,
-      messages: allMessages,
-      stream: true,
-      provider: FREE_ONLY_PROVIDER_OPTIONS,
-    }),
-  });
+  const response = await fetchOpenRouterWithTimeout({
+    model,
+    messages: allMessages,
+    stream: true,
+    provider: FREE_ONLY_PROVIDER_OPTIONS,
+  }, apiKey);
 
   if (!response.ok) {
     const errorBody = await response.text();
@@ -134,6 +131,26 @@ export async function streamChat(
   }
 
   return response;
+}
+
+async function fetchOpenRouterWithTimeout(body: Record<string, unknown>, apiKey?: string | null): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OPENROUTER_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: getHeaders(apiKey),
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error('OpenRouter did not start a response in time. Please retry or choose another free model.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function generateTitle(

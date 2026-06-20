@@ -59,6 +59,7 @@ check('every curated model id is explicitly free', curatedIds.every((id) => id.e
 check('default model id is explicitly free', Boolean(defaultMatch?.[1].endsWith(':free')));
 check('fallback chain does not use router aliases', !/openrouter\/(auto|free)/.test(fallbackBlock));
 check('OpenRouter requests enforce zero max price', /max_price:\s*\{[\s\S]*prompt:\s*0[\s\S]*completion:\s*0/.test(openrouter));
+check('OpenRouter chat startup has a request timeout', /OPENROUTER_REQUEST_TIMEOUT_MS/.test(openrouter) && /fetchOpenRouterWithTimeout/.test(openrouter));
 check('dynamic model fetch requires :free ids', /id\.endsWith\(':free'\)/.test(openrouter));
 check('chat route rejects non-free model ids', /isFreeModelId\(model\)/.test(chatRoute));
 check('hosted quota commits after provider acceptance', /commitHostedQuota\(hostedQuota\)/.test(chatRoute) && /getHostedQuotaStatus/.test(chatRoute));
@@ -78,6 +79,7 @@ check('research planner uses generic query analysis', /analyzeResearchQuery/.tes
 check('research planner avoids topic-specific subject hardcoding', !/OpenAI|ChatGPT|Claude|Anthropic|Continental|GT 650|Supabase|Firebase/.test(researchPlanner));
 check('research planner decomposes by intent and subject', /subjectQueries/.test(researchPlanner) && /intentQueries/.test(researchPlanner) && /STOP_WORDS/.test(researchPlanner));
 check('research planner handles comparisons without topic dictionaries', /extractComparisonSubjects/.test(researchPlanner) && /stripAudienceContext/.test(researchPlanner));
+check('research planner handles purchase constraints generically', /buildConstraintSearchQuery/.test(researchPlanner) && /extractPurchaseSubjects/.test(researchPlanner) && /extractBudgetConstraint/.test(researchPlanner));
 check('deep research mode expands query and source depth', /deep-research/.test(searchRoute) && /MAX_DEEP_PLANNED_QUERIES/.test(researchPlanner) && /maxCombinedResultsForMode/.test(searchLib));
 check('research trace is saved on messages', /researchTrace/.test(useChat) && /buildResearchTrace/.test(useChat));
 check('research trace renders in source panel', /Research trace/.test(messageComponent) && /plannedQueries/.test(messageComponent));
@@ -90,6 +92,8 @@ check('chat route preserves source quality for prompting', /sourceScore/.test(ch
 check('research prompts include current date and stale-memory guardrails', /Current Date/.test(prompts) && /stale memory/.test(prompts));
 check('research prompts forbid knowledge-cutoff phrasing', /based on my current knowledge/.test(prompts) && /knowledge cutoff/.test(prompts) && /must be grounded/.test(prompts));
 check('research failures fall back to source-backed answers', /buildResearchFallbackAnswer/.test(researchFallback) && /buildClientResearchFallback/.test(useChat) && /emittedContent/.test(chatRoute));
+check('chat stream stalls are bounded and recoverable', /CHAT_STREAM_IDLE_TIMEOUT_MS/.test(chatRoute) && /readStreamChunkWithTimeout/.test(chatRoute) && /did not stream a response in time/.test(chatRoute));
+check('client search and title requests have timeouts', /SEARCH_REQUEST_TIMEOUT_MS/.test(useChat) && /TITLE_REQUEST_TIMEOUT_MS/.test(useChat) && /fetchWithTimeout/.test(useChat));
 check('research reports are extracted as artifacts', /extractResearchReportArtifact/.test(artifactsLib) && /Research Evidence/.test(artifactsLib));
 check('artifacts can be exported directly', /handleDownload/.test(read('src/components/artifact-panel.tsx')) && /artifactExtension/.test(read('src/components/artifact-panel.tsx')));
 check('database migration repairs artifact indexes', /artifactStore\.indexNames\.contains\('by-project'\)/.test(db));

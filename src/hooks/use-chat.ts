@@ -11,6 +11,8 @@ import { buildResearchFallbackAnswer } from '@/lib/research-fallback';
 
 const STREAM_FLUSH_MS = 18;
 const STREAM_FINISH_BUDGET_MS = 900;
+const SEARCH_REQUEST_TIMEOUT_MS = 70 * 1000;
+const TITLE_REQUEST_TIMEOUT_MS = 20 * 1000;
 
 type StreamingDisplay = {
   append: (content: string) => void;
@@ -119,14 +121,14 @@ export function useChat(
             mode: searchMode,
             label: researchStatusLabel(initialPhase, searchMode),
           });
-          const searchRes = await fetch('/api/search', {
+          const searchRes = await fetchWithTimeout('/api/search', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               ...(tavilyApiKey ? { 'x-tavily-key': tavilyApiKey } : {}),
             },
             body: JSON.stringify({ query: content.trim(), mode: searchMode }),
-          });
+          }, SEARCH_REQUEST_TIMEOUT_MS);
           if (searchRes.ok) {
             searchResults = await searchRes.json();
             setResearchStatus({
@@ -384,7 +386,7 @@ export function useChat(
             return;
           }
           try {
-            const titleRes = await fetch('/api/chat', {
+            const titleRes = await fetchWithTimeout('/api/chat', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -398,7 +400,7 @@ export function useChat(
                 model: activeModel,
                 generateTitleFor: true,
               }),
-            });
+            }, TITLE_REQUEST_TIMEOUT_MS);
             if (titleRes.ok) {
               const { title } = await titleRes.json();
               const cleanTitle = typeof title === 'string' ? title.trim() : '';
@@ -911,4 +913,22 @@ function takeStreamingChunk(text: string): string {
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error('Request timed out. Please retry.');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }

@@ -11,6 +11,7 @@ type ResearchIntent = {
   risk: boolean;
   technical: boolean;
   evidence: boolean;
+  purchase: boolean;
 };
 
 type ResearchAnalysis = {
@@ -126,6 +127,8 @@ const INTENT_WORDS = new Set([
   'pros',
   'recommend',
   'recommendation',
+  'purchase',
+  'purchasing',
   'release',
   'released',
   'review',
@@ -179,11 +182,19 @@ function inferResearchIntent(query: string): ResearchIntent {
     risk: /\b(security|privacy|risk|risks|legal|compliance|policy|law|regulation|safety|safe)\b/.test(lower),
     technical: /\b(api|docs|documentation|framework|library|github|open source|opensource|developer|code|spec|specs|specification|specifications)\b/.test(lower),
     evidence: /\b(source|sources|cite|citation|research|verify|fact check|fact-check|evidence|proof)\b/.test(lower),
+    purchase: /\b(buy|buying|purchase|purchasing|shop|shopping|recommend|recommendation|budget)\b/.test(lower),
   };
 }
 
 function subjectQueries(analysis: ResearchAnalysis): string[] {
   const queries: string[] = [];
+  const constraintQuery = buildConstraintSearchQuery(analysis.originalQuery);
+  if (constraintQuery) {
+    queries.push(constraintQuery);
+    queries.push(`${constraintQuery} best options`);
+    queries.push(`${constraintQuery} latest price reviews`);
+  }
+
   for (const subject of analysis.subjects.slice(0, MAX_SUBJECTS)) {
     queries.push(`${subject} official`);
 
@@ -193,6 +204,10 @@ function subjectQueries(analysis: ResearchAnalysis): string[] {
 
     if (analysis.intent.pricing) {
       queries.push(`${subject} official pricing cost`);
+    }
+
+    if (analysis.intent.purchase) {
+      queries.push(`${subject} buying guide reviews`);
     }
 
     if (analysis.intent.technical) {
@@ -260,6 +275,7 @@ function deepResearchQueries(analysis: ResearchAnalysis): string[] {
 
 function extractCandidateSubjects(query: string): string[] {
   const quoted = Array.from(query.matchAll(/"([^"]{2,100})"|'([^']{2,100})'/g)).map((match) => match[1] || match[2]);
+  const purchaseSubjects = extractPurchaseSubjects(query);
   const comparisonParts = extractComparisonSubjects(query);
   const prepositionSubjects = Array.from(query.matchAll(/\b(?:of|for|about|on|regarding|between)\s+([^?.,;:]{3,120})/gi))
     .map((match) => cleanSubject(match[1] || ''))
@@ -268,6 +284,7 @@ function extractCandidateSubjects(query: string): string[] {
 
   return dedupeQueries([
     ...quoted,
+    ...purchaseSubjects,
     ...comparisonParts,
     ...prepositionSubjects,
     reducedWholeQuery,
@@ -276,6 +293,65 @@ function extractCandidateSubjects(query: string): string[] {
     .filter((subject) => subject.length >= 2)
     .filter((subject) => subject.split(/\s+/).length <= 8)
     .slice(0, MAX_SUBJECTS);
+}
+
+function extractPurchaseSubjects(query: string): string[] {
+  return Array.from(query.matchAll(/\b(?:buy|purchase|get|choose)\s+(?:a|an|the)?\s*([^?.,;:]{2,80}?)(?:\s+(?:with|under|below|within|for|that|which|and)\b|$)/gi))
+    .map((match) => cleanSubject(match[1] || ''))
+    .filter(Boolean);
+}
+
+function buildConstraintSearchQuery(query: string): string | null {
+  const product = extractPurchaseSubjects(query)[0] || extractCandidateSubjectsWithoutConstraints(query)[0];
+  if (!product) return null;
+
+  const constraints = [
+    extractBudgetConstraint(query),
+    extractAttributeConstraint(query),
+  ].filter(Boolean).join(' ');
+
+  if (!constraints) return null;
+  return normalizeSubject(`${product} ${constraints}`);
+}
+
+function extractCandidateSubjectsWithoutConstraints(query: string): string[] {
+  const comparisonParts = extractComparisonSubjects(query);
+  const reducedWholeQuery = cleanSubject(query);
+  return dedupeQueries([...comparisonParts, reducedWholeQuery])
+    .map(normalizeSubject)
+    .filter((subject) => subject.length >= 2)
+    .filter((subject) => subject.split(/\s+/).length <= 8)
+    .slice(0, MAX_SUBJECTS);
+}
+
+function extractBudgetConstraint(query: string): string {
+  const normalized = normalizeSubject(query);
+  const budgetMatch = normalized.match(/\b(?:budget\s+(?:of|is)?|under|below|within|less than|up to)\s+(.{1,80}?)(?:\s+(?:and|with|for|to|want|buy|purchase)\b|$)/i);
+  const value = budgetMatch?.[1]?.trim() || '';
+  if (!/\b(?:rupees?|rs|inr|lakh|lakhs|crore|crores|dollars?|\$|usd|eur|€|gbp|£)\b/i.test(value)) return '';
+  return `under ${value}`;
+}
+
+function extractAttributeConstraint(query: string): string {
+  const normalized = normalizeSubject(query)
+    .replace(/\batleast\b/gi, 'at least')
+    .replace(/\bminimum\b/gi, 'at least');
+  const withMatch = normalized.match(/\bwith\s+([^?.,;:]{2,120})/i);
+  const atLeastMatch = normalized.match(/\bat least\s+([^?.,;:]{2,80})/i);
+  const withText = cleanupAttributeText(withMatch?.[1] || '');
+  const atLeastText = atLeastMatch ? cleanupAttributeText(`at least ${atLeastMatch[1]}`) : '';
+  return dedupeQueries([
+    withText,
+    atLeastText && !withText.toLowerCase().includes(atLeastText.toLowerCase()) ? atLeastText : '',
+  ]).join(' ');
+}
+
+function cleanupAttributeText(value: string): string {
+  return value
+    .replace(/\batleast\b/gi, 'at least')
+    .replace(/\s+and\s+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function extractComparisonSubjects(query: string): string[] {

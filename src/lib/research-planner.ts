@@ -40,6 +40,10 @@ const STOP_WORDS = new Set([
   'can',
   'changed',
   'changes',
+  'cheapest',
+  'choice',
+  'choices',
+  'choose',
   'compare',
   'comparison',
   'could',
@@ -48,8 +52,10 @@ const STOP_WORDS = new Set([
   'did',
   'do',
   'does',
+  'else',
   'for',
   'from',
+  'get',
   'give',
   'has',
   'have',
@@ -68,9 +74,15 @@ const STOP_WORDS = new Set([
   'of',
   'on',
   'one',
+  'ones',
+  'option',
+  'options',
   'or',
+  'pick',
   'please',
   'recent',
+  'recommended',
+  'right',
   'should',
   'show',
   'tell',
@@ -85,6 +97,7 @@ const STOP_WORDS = new Set([
   'under',
   'up',
   'us',
+  'use',
   'versus',
   'vs',
   'want',
@@ -276,12 +289,13 @@ function deepResearchQueries(analysis: ResearchAnalysis): string[] {
 
 function extractCandidateSubjects(query: string): string[] {
   const quoted = Array.from(query.matchAll(/"([^"]{2,100})"|'([^']{2,100})'/g)).map((match) => match[1] || match[2]);
+  const strippedQuery = stripQuestionFrame(query);
   const purchaseSubjects = extractPurchaseSubjects(query);
-  const comparisonParts = extractComparisonSubjects(query);
-  const prepositionSubjects = Array.from(query.matchAll(/\b(?:of|for|about|on|regarding|between)\s+([^?.,;:]{3,120})/gi))
+  const comparisonParts = extractComparisonSubjects(strippedQuery);
+  const prepositionSubjects = Array.from(strippedQuery.matchAll(/\b(?:of|for|about|on|regarding|between)\s+([^?.,;:]{3,120})/gi))
     .map((match) => cleanSubject(match[1] || ''))
     .filter(Boolean);
-  const reducedWholeQuery = cleanSubject(query);
+  const reducedWholeQuery = cleanSubject(strippedQuery);
 
   return dedupeQueries([
     ...quoted,
@@ -316,8 +330,9 @@ function buildConstraintSearchQuery(query: string): string | null {
 }
 
 function extractCandidateSubjectsWithoutConstraints(query: string): string[] {
-  const comparisonParts = extractComparisonSubjects(query);
-  const reducedWholeQuery = cleanSubject(query);
+  const strippedQuery = stripQuestionFrame(query);
+  const comparisonParts = extractComparisonSubjects(strippedQuery);
+  const reducedWholeQuery = cleanSubject(strippedQuery);
   return dedupeQueries([...comparisonParts, reducedWholeQuery])
     .map(normalizeSubject)
     .filter((subject) => subject.length >= 2)
@@ -356,7 +371,7 @@ function cleanupAttributeText(value: string): string {
 }
 
 function extractComparisonSubjects(query: string): string[] {
-  const parts = query.split(/\b(?:vs\.?|versus|compared with|compared to|or)\b|\+/i);
+  const parts = stripQuestionFrame(query).split(/\b(?:vs\.?|versus|compared with|compared to|or)\b/i);
   if (parts.length < 2) return [];
 
   return parts
@@ -364,16 +379,16 @@ function extractComparisonSubjects(query: string): string[] {
       const cleaned = cleanSubject(part);
       if (!cleaned) return '';
       const tokens = cleaned.split(/\s+/);
-      if (index === 0) return tokens.slice(-3).join(' ');
-      if (index === parts.length - 1) return tokens.slice(0, 3).join(' ');
-      return tokens.slice(0, 3).join(' ');
+      if (index === 0) return tokens.slice(-5).join(' ');
+      if (index === parts.length - 1) return tokens.slice(0, 5).join(' ');
+      return tokens.slice(0, 5).join(' ');
     })
     .map(trimLooseConnectors)
     .filter(Boolean);
 }
 
 function cleanSubject(value: string): string {
-  const tokens = normalizeSubject(stripAudienceContext(value))
+  const tokens = normalizeSubject(stripQuestionFrame(stripAudienceContext(value)))
     .split(/\s+/)
     .map((token) => token.trim())
     .filter(Boolean)
@@ -390,6 +405,18 @@ function stripAudienceContext(value: string): string {
   );
 }
 
+function stripQuestionFrame(value: string): string {
+  return normalizeSubject(value)
+    .replace(/\b(?:can|could|would)\s+(?:you|u)\b/gi, ' ')
+    .replace(/\b(?:tell|show|give)\s+(?:me|us)?\b/gi, ' ')
+    .replace(/\b(?:which|what)\s+(?:one|ones|option|options|tool|model|product|thing|choice)?\s*(?:is|are|would be)?\s*(?:the)?\s*(?:best|better|cheapest|recommended|right)\b/gi, ' ')
+    .replace(/\b(?:should|can|could)\s+(?:i|we|you)\s+(?:use|buy|choose|get|pick)\b/gi, ' ')
+    .replace(/\b(?:i|we)\s+(?:want|need|have|am looking|are looking)\s+(?:to|for)?\b/gi, ' ')
+    .replace(/\b(?:compare|recommend|suggest|choose|pick)\s+(?:between|from|for)?\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function normalizeSubject(value: string): string {
   return value
     .replace(/https?:\/\/\S+/gi, ' ')
@@ -403,8 +430,8 @@ function normalizeSubject(value: string): string {
 
 function trimLooseConnectors(value: string): string {
   return value
-    .replace(/^(?:and|or|of|for|about|on|with|between)\s+/i, '')
-    .replace(/\s+(?:and|or|of|for|about|on|with|between)$/i, '')
+    .replace(/^(?:\+|and|or|of|for|about|on|with|between)\s+/i, '')
+    .replace(/\s+(?:\+|and|or|of|for|about|on|with|between)$/i, '')
     .trim();
 }
 

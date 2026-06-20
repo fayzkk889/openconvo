@@ -9,6 +9,7 @@ import * as storage from '@/lib/storage';
 import { generateId } from '@/lib/utils';
 import { buildResearchFallbackAnswer } from '@/lib/research-fallback';
 import { ensureResearchCitations } from '@/lib/research-citations';
+import { buildConversationTitle } from '@/lib/title';
 
 const STREAM_FLUSH_MS = 18;
 const STREAM_FINISH_BUDGET_MS = 900;
@@ -386,8 +387,9 @@ export function useChat(
 
         // Generate title if this is the first exchange
         if (currentMessages.length <= 1 && onTitleGenerated) {
+          const fallbackTitle = buildConversationTitle(content.trim());
           if (!openrouterApiKey) {
-            onTitleGenerated(buildLocalTitle(content.trim()));
+            onTitleGenerated(fallbackTitle);
             return;
           }
           try {
@@ -409,10 +411,14 @@ export function useChat(
             if (titleRes.ok) {
               const { title } = await titleRes.json();
               const cleanTitle = typeof title === 'string' ? title.trim() : '';
-              if (cleanTitle && cleanTitle !== 'New conversation') onTitleGenerated(cleanTitle);
+              if (cleanTitle && cleanTitle !== 'New conversation') {
+                onTitleGenerated(cleanTitle);
+              } else {
+                onTitleGenerated(fallbackTitle);
+              }
             }
           } catch {
-            // Title generation failure is non-critical
+            onTitleGenerated(fallbackTitle);
           }
         }
       } finally {
@@ -803,20 +809,6 @@ function normalizeStringArray(value: unknown): string[] {
 
 function uniqueModels(models: string[]): string[] {
   return Array.from(new Set(models.filter((modelId) => modelId.trim().length > 0)));
-}
-
-function buildLocalTitle(content: string): string {
-  const words = content
-    .replace(/\[[^\]]*\]/g, ' ')
-    .replace(/[`*_#[\](){}>]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 6)
-    .join(' ');
-
-  return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'New conversation';
 }
 
 function buildClientResearchFallback(

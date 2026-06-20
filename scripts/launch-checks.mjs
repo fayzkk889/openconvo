@@ -18,6 +18,7 @@ const searchRoute = read('src/app/api/search/route.ts');
 const searchLib = read('src/lib/search.ts');
 const webExtract = read('src/lib/web-extract.ts');
 const researchPlanner = read('src/lib/research-planner.ts');
+const titleLib = read('src/lib/title.ts');
 const sourceQuality = read('src/lib/source-quality.ts');
 const artifactsLib = read('src/lib/artifacts.ts');
 const prompts = read('src/lib/prompts.ts');
@@ -81,6 +82,7 @@ check('research planner uses generic query analysis', /analyzeResearchQuery/.tes
 check('research planner avoids topic-specific subject hardcoding', !/OpenAI|ChatGPT|Claude|Anthropic|Continental|GT 650|Supabase|Firebase/.test(researchPlanner));
 check('research planner decomposes by intent and subject', /subjectQueries/.test(researchPlanner) && /intentQueries/.test(researchPlanner) && /STOP_WORDS/.test(researchPlanner));
 check('research planner handles comparisons without topic dictionaries', /extractComparisonSubjects/.test(researchPlanner) && /stripAudienceContext/.test(researchPlanner));
+check('research planner strips generic question frames', /stripQuestionFrame/.test(researchPlanner) && /which\|what/.test(researchPlanner) && /should\|can\|could/.test(researchPlanner));
 check('research planner handles purchase constraints generically', /buildConstraintSearchQuery/.test(researchPlanner) && /extractPurchaseSubjects/.test(researchPlanner) && /extractBudgetConstraint/.test(researchPlanner));
 check('deep research mode expands query and source depth', /deep-research/.test(searchRoute) && /MAX_DEEP_PLANNED_QUERIES/.test(researchPlanner) && /maxCombinedResultsForMode/.test(searchLib));
 check('research trace is saved on messages', /researchTrace/.test(useChat) && /buildResearchTrace/.test(useChat));
@@ -102,6 +104,7 @@ check('message actions stay clickable while hovering', !/opacity-0 group-hover:o
 check('markdown tables remain contained', /overflow-x: auto/.test(globals) && /vertical-align: top/.test(globals));
 check('chat stream stalls are bounded and recoverable', /CHAT_STREAM_IDLE_TIMEOUT_MS/.test(chatRoute) && /readStreamChunkWithTimeout/.test(chatRoute) && /did not stream a response in time/.test(chatRoute));
 check('client search and title requests have timeouts', /SEARCH_REQUEST_TIMEOUT_MS/.test(useChat) && /TITLE_REQUEST_TIMEOUT_MS/.test(useChat) && /fetchWithTimeout/.test(useChat));
+check('local conversation titles are summarized, not raw first prompts', /buildConversationTitle/.test(titleLib) && /buildComparisonTitle/.test(titleLib) && /buildPurchaseTitle/.test(titleLib) && /buildFeatureTitle/.test(titleLib) && /buildConversationTitle/.test(useChat) && !/function buildLocalTitle/.test(useChat));
 check('research reports are extracted as artifacts', /extractResearchReportArtifact/.test(artifactsLib) && /Research Evidence/.test(artifactsLib));
 check('artifacts can be exported directly', /handleDownload/.test(read('src/components/artifact-panel.tsx')) && /artifactExtension/.test(read('src/components/artifact-panel.tsx')));
 check('database migration repairs artifact indexes', /artifactStore\.indexNames\.contains\('by-project'\)/.test(db));

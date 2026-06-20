@@ -158,13 +158,21 @@ function isObviouslyLocalOrPersonal(text: string): boolean {
 function looksLikeExternalDecision(text: string): boolean {
   const lower = text.toLowerCase();
 
-  if (/\b(product|tool|app|software|service|platform|library|framework|api|model|phone|laptop|camera|car|course|company|vendor|provider|hosting|database|cloud)\b/.test(lower)) {
+  if (/\b(product|tool|app|software|service|platform|library|framework|api|model|phone|laptop|camera|car|course|company|vendor|provider|hosting|database|cloud|subscription|plan)\b/.test(lower)) {
     return true;
   }
 
-  if (/\b(gpt|openai|codex|chatgpt|claude|anthropic|opus|sonnet|haiku|gemini|google ai|llama|mistral|cohere|perplexity|manus|cursor|windsurf|copilot|notion|slack|figma|vercel|supabase|firebase)\b/.test(lower)) {
+  if (/\b(?:rs|inr|lakh|lakhs|crore|crores|usd|dollars?|\$|gbp|eur)\b/.test(lower)) {
     return true;
   }
 
-  return /\b[A-Z][A-Za-z0-9.+-]{2,}\b/.test(text);
+  if (/\b(?:gpu|cpu|ram|ssd|battery|display|camera|engine|mileage|benchmark|latency|context|tokens?|pricing|price|cost)\b/.test(lower)) {
+    return true;
+  }
+
+  if (/\b[A-Z][A-Za-z0-9.+-]{2,}\b/.test(text)) {
+    return true;
+  }
+
+  return /\b[a-z]+[.-]?[0-9][a-z0-9.-]*\b/i.test(text);
 }

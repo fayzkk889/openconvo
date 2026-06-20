@@ -11,6 +11,7 @@ import { ensureResearchCitations } from '@/lib/research-citations';
 const MAX_MESSAGES = 100;
 const MAX_MESSAGE_CHARS = 50000;
 const MAX_CONTEXT_ITEMS = 10;
+const MAX_SEARCH_CONTENT_CHARS = 2500;
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 30 * 1000;
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 25 * 1000;
 
@@ -534,7 +535,7 @@ function normalizeSearchResults(value: unknown): SearchResult[] | undefined {
       title: result.title.slice(0, 200),
       url: result.url.slice(0, 1000),
       snippet: typeof result.snippet === 'string' ? result.snippet.slice(0, 1000) : '',
-      content: typeof result.content === 'string' ? result.content.slice(0, 5000) : undefined,
+      content: typeof result.content === 'string' ? result.content.slice(0, MAX_SEARCH_CONTENT_CHARS) : undefined,
       extracted: typeof result.extracted === 'boolean' ? result.extracted : undefined,
       fetchedAt: typeof result.fetchedAt === 'number' ? result.fetchedAt : undefined,
       sourceScore: typeof result.sourceScore === 'number' ? Math.max(0, Math.min(100, Math.floor(result.sourceScore))) : undefined,

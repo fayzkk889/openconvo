@@ -7,6 +7,7 @@ const DEFAULT_USER_AGENT = 'OpenConvo/0.1 (+https://openconvo.vercel.app)';
 const SEARCH_TIMEOUT_MS = 8000;
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const SEARCH_CACHE_MAX = 80;
+const MIN_DIVERSIFIED_RESULTS = 6;
 
 export type SearchMode = 'search' | 'research' | 'deep-research';
 
@@ -46,6 +47,7 @@ export async function searchWeb(
   };
   const providerErrors: string[] = [];
   const providerResults: SearchProviderResult[] = [];
+  const hasConfiguredSearchProvider = Boolean(clientKey || process.env.TAVILY_API_KEY || process.env.SEARXNG_URL);
 
   for (const provider of getSearchProviders()) {
     if (!provider.available(context)) continue;
@@ -97,7 +99,10 @@ export async function searchWeb(
     provider: 'none',
     mode,
     results: [],
-    providerErrors,
+    providerErrors: [
+      ...providerErrors,
+      ...(!hasConfiguredSearchProvider ? ['keyless-search: hosted keyless search depends on DuckDuckGo HTML and may be blocked or rate-limited from cloud IPs; configure Tavily or SearxNG for reliable live research'] : []),
+    ],
   };
 }
 
@@ -379,6 +384,7 @@ function diversifyResearchResults(results: SearchResult[], query: string, entiti
   }
 
   for (const result of comparisonResults) {
+    if (selected.size >= MIN_DIVERSIFIED_RESULTS) break;
     selected.set(canonicalUrlKey(result.url), result);
   }
 
@@ -418,6 +424,7 @@ function diversifyByEntities(results: SearchResult[], entities: string[]): Searc
   }
 
   for (const result of results) {
+    if (selected.size >= MIN_DIVERSIFIED_RESULTS) break;
     selected.set(canonicalUrlKey(result.url), result);
   }
 

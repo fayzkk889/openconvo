@@ -70,8 +70,10 @@ check('hosted quota response omits internal identity', /publicHostedUsage/.test(
 check('hosted search quota commits after search success', /commitHostedSearchQuota\(hostedQuota\)/.test(searchRoute) && /getHostedSearchQuotaStatus/.test(searchRoute));
 check('hosted search quota has response headers', /X-OpenConvo-Search-Limit/.test(searchRoute) && /X-OpenConvo-Search-Remaining/.test(searchRoute));
 check('search route exposes provider metadata', /X-OpenConvo-Search-Provider/.test(searchRoute));
+check('search route has bounded serverless budget', /export const maxDuration = 60/.test(searchRoute) && /SEARCH_ROUTE_BUDGET_MS/.test(searchRoute) && /RESEARCH_PLANNER_BUDGET_MS/.test(searchRoute));
 check('web search has provider fallback', /SearchProvider/.test(searchLib) && /tavilyProvider/.test(searchLib) && /duckDuckGoProvider/.test(searchLib));
 check('research search aggregates multiple providers', /providerResults/.test(searchLib) && /mode === 'search'/.test(searchLib) && /providers/.test(searchLib));
+check('research source diversification enforces host caps', /MIN_DIVERSIFIED_RESULTS/.test(searchLib) && /selected\.size >= MIN_DIVERSIFIED_RESULTS/.test(searchLib) && !/for \(const result of comparisonResults\) \{\s*selected\.set\(canonicalUrlKey\(result\.url\), result\);\s*\}/.test(searchLib));
 check('web search supports optional SearxNG', /searxngProvider/.test(searchLib) && /SEARXNG_URL/.test(searchLib));
 check('web search providers have timeouts and cache', /SEARCH_TIMEOUT_MS/.test(searchLib) && /withTimeout/.test(searchLib) && /searchCache/.test(searchLib));
 check('web search enriches results with page extraction', /enrichSearchResults/.test(searchRoute) && /fetchReadablePage/.test(webExtract));
@@ -110,6 +112,7 @@ check('message actions stay clickable while hovering', !/opacity-0 group-hover:o
 check('markdown tables remain contained', /overflow-x: auto/.test(globals) && /vertical-align: top/.test(globals));
 check('chat stream stalls are bounded and recoverable', /CHAT_STREAM_IDLE_TIMEOUT_MS/.test(chatRoute) && /readStreamChunkWithTimeout/.test(chatRoute) && /did not stream a response in time/.test(chatRoute));
 check('client search and title requests have timeouts', /SEARCH_REQUEST_TIMEOUT_MS/.test(useChat) && /TITLE_REQUEST_TIMEOUT_MS/.test(useChat) && /fetchWithTimeout/.test(useChat));
+check('research retries progressively shrink context', /RESEARCH_RETRY_SOURCE_LIMITS/.test(useChat) && /compactSearchResultsForAttempt/.test(useChat) && /MAX_SOURCE_CONTENT_CHARS/.test(prompts) && /MAX_SEARCH_CONTENT_CHARS/.test(chatRoute));
 check('local conversation titles are summarized, not raw first prompts', /buildConversationTitle/.test(titleLib) && /buildComparisonTitle/.test(titleLib) && /buildPurchaseTitle/.test(titleLib) && /buildFeatureTitle/.test(titleLib) && /buildConversationTitle/.test(useChat) && /buildConversationTitle/.test(openrouter) && !/function buildLocalTitle/.test(useChat));
 check('research reports are extracted as artifacts', /extractResearchReportArtifact/.test(artifactsLib) && /Research Evidence/.test(artifactsLib));
 check('artifacts can be exported directly', /handleDownload/.test(read('src/components/artifact-panel.tsx')) && /artifactExtension/.test(read('src/components/artifact-panel.tsx')));

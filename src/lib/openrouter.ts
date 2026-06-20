@@ -4,6 +4,7 @@ import { buildConversationTitle } from './title';
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 const OPENROUTER_REQUEST_TIMEOUT_MS = 45 * 1000;
+const OPENROUTER_PLANNER_ATTEMPT_TIMEOUT_MS = 8 * 1000;
 const FREE_ONLY_PROVIDER_OPTIONS = {
   sort: 'price',
   max_price: {
@@ -139,9 +140,13 @@ export async function streamChat(
   return response;
 }
 
-async function fetchOpenRouterWithTimeout(body: Record<string, unknown>, apiKey?: string | null): Promise<Response> {
+async function fetchOpenRouterWithTimeout(
+  body: Record<string, unknown>,
+  apiKey?: string | null,
+  timeoutMs = OPENROUTER_REQUEST_TIMEOUT_MS
+): Promise<Response> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), OPENROUTER_REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(`${OPENROUTER_BASE}/chat/completions`, {
       method: 'POST',
@@ -209,6 +214,7 @@ export async function generateResearchPlan(
     apiKey?: string | null;
     preferredModel?: string;
     deep?: boolean;
+    timeoutMs?: number;
   }
 ): Promise<GeneratedResearchPlan | null> {
   const normalizedQuery = query.replace(/\s+/g, ' ').trim().slice(0, 500);
@@ -238,7 +244,11 @@ export async function generateResearchPlan(
     Boolean(model) && isFreeModelId(model) && all.indexOf(model) === index
   );
 
+  const deadline = Date.now() + Math.max(1000, options?.timeoutMs ?? 10_000);
+
   for (const model of modelsToTry) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
     try {
       const response = await fetchOpenRouterWithTimeout({
         model,
@@ -246,7 +256,7 @@ export async function generateResearchPlan(
         max_tokens: 220,
         temperature: 0.2,
         provider: FREE_ONLY_PROVIDER_OPTIONS,
-      }, options?.apiKey);
+      }, options?.apiKey, Math.min(OPENROUTER_PLANNER_ATTEMPT_TIMEOUT_MS, remainingMs));
 
       if (!response.ok) continue;
       const data = await response.json() as {

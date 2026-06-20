@@ -16,6 +16,8 @@ const STREAM_FINISH_BUDGET_MS = 900;
 const SEARCH_REQUEST_TIMEOUT_MS = 70 * 1000;
 const TITLE_REQUEST_TIMEOUT_MS = 20 * 1000;
 const EMPTY_RESPONSE_RETRY_ATTEMPTS = 2;
+const RESEARCH_RETRY_SOURCE_LIMITS = [10, 7, 5];
+const RESEARCH_RETRY_CONTENT_LIMITS = [1200, 700, 350];
 
 type StreamingDisplay = {
   append: (content: string) => void;
@@ -256,7 +258,7 @@ export function useChat(
                     .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
                     .map((item) => item.id),
                   systemPrompt: systemPrompt || undefined,
-                  searchResults: searchResults?.results,
+                  searchResults: compactSearchResultsForAttempt(searchResults?.results, attempt),
                   attachments,
                   researchMode: shouldUseResearch,
                   agentMode: agentEnabled === true,
@@ -557,7 +559,7 @@ export function useChat(
                 .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
                 .map((item) => item.id),
               systemPrompt: systemPrompt || undefined,
-              searchResults: targetMessage.searchResults,
+              searchResults: compactSearchResultsForAttempt(targetMessage.searchResults, attempt),
               attachments: userMsg.attachments,
               researchMode: targetMessage.researchMode === true,
               agentMode: targetMessage.agentMode === true,
@@ -831,6 +833,21 @@ function normalizeStringArray(value: unknown): string[] {
 
 function uniqueModels(models: string[]): string[] {
   return Array.from(new Set(models.filter((modelId) => modelId.trim().length > 0)));
+}
+
+function compactSearchResultsForAttempt<T extends { content?: string; snippet?: string }>(
+  results: T[] | undefined,
+  attempt: number
+): T[] | undefined {
+  if (!results?.length) return results;
+  const sourceLimit = RESEARCH_RETRY_SOURCE_LIMITS[Math.min(attempt, RESEARCH_RETRY_SOURCE_LIMITS.length - 1)];
+  const contentLimit = RESEARCH_RETRY_CONTENT_LIMITS[Math.min(attempt, RESEARCH_RETRY_CONTENT_LIMITS.length - 1)];
+
+  return results.slice(0, sourceLimit).map((result) => ({
+    ...result,
+    content: typeof result.content === 'string' ? result.content.slice(0, contentLimit) : undefined,
+    snippet: typeof result.snippet === 'string' ? result.snippet.slice(0, 500) : result.snippet,
+  }));
 }
 
 function buildClientResearchFallback(

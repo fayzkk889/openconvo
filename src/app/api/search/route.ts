@@ -4,7 +4,12 @@ import { enrichSearchResults } from '@/lib/web-extract';
 import { planResearchQueries } from '@/lib/research-planner';
 import { generateResearchPlan } from '@/lib/openrouter';
 
+export const maxDuration = 60;
+
 type SearchUsageMode = 'byok' | 'hosted-search';
+
+const SEARCH_ROUTE_BUDGET_MS = 52_000;
+const RESEARCH_PLANNER_BUDGET_MS = 9_000;
 
 interface HostedSearchQuota {
   allowed: boolean;
@@ -47,42 +52,44 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const searchMode = mode === 'deep-research' ? 'deep-research' : mode === 'research' ? 'research' : 'search';
-    const researchPlan = searchMode !== 'search'
-      ? await buildResearchPlan(trimmedQuery, {
-        deep: searchMode === 'deep-research',
-        apiKey: openrouterKey,
-        model: typeof model === 'string' ? model : undefined,
-      })
-      : null;
-    const results = researchPlan
-      ? await searchWebMany(researchPlan.queries, key, searchMode, researchPlan.entities || [])
-      : await searchWeb(trimmedQuery, key, searchMode);
-    const enrichedResults = await enrichSearchResults(results.results, {
-      maxPages: searchMode === 'deep-research' ? 8 : searchMode === 'research' ? 5 : 2,
-    });
-    const committedQuota = commitHostedSearchQuota(hostedQuota);
+    return await withTimeout(async () => {
+      const searchMode = mode === 'deep-research' ? 'deep-research' : mode === 'research' ? 'research' : 'search';
+      const researchPlan = searchMode !== 'search'
+        ? await buildResearchPlan(trimmedQuery, {
+          deep: searchMode === 'deep-research',
+          apiKey: openrouterKey,
+          model: typeof model === 'string' ? model : undefined,
+        })
+        : null;
+      const results = researchPlan
+        ? await searchWebMany(researchPlan.queries, key, searchMode, researchPlan.entities || [])
+        : await searchWeb(trimmedQuery, key, searchMode);
+      const enrichedResults = await enrichSearchResults(results.results, {
+        maxPages: searchMode === 'deep-research' ? 8 : searchMode === 'research' ? 5 : 2,
+      });
+      const committedQuota = commitHostedSearchQuota(hostedQuota);
 
-    return Response.json(
-      {
-        ...results,
-        results: enrichedResults,
-        plannedEntities: researchPlan?.entities,
-        planner: researchPlan?.planner,
-        hostedSearchUsage: publicHostedSearchUsage(committedQuota),
-      },
-      {
-        headers: {
-          ...hostedSearchHeaders(committedQuota.mode, committedQuota),
-          'X-OpenConvo-Search-Provider': results.providers?.join(',') || results.provider || 'unknown',
-          'X-OpenConvo-Research-Queries': String(results.plannedQueries?.length || 1),
+      return Response.json(
+        {
+          ...results,
+          results: enrichedResults,
+          plannedEntities: researchPlan?.entities,
+          planner: researchPlan?.planner,
+          hostedSearchUsage: publicHostedSearchUsage(committedQuota),
         },
-      }
-    );
+        {
+          headers: {
+            ...hostedSearchHeaders(committedQuota.mode, committedQuota),
+            'X-OpenConvo-Search-Provider': results.providers?.join(',') || results.provider || 'unknown',
+            'X-OpenConvo-Research-Queries': String(results.plannedQueries?.length || 1),
+          },
+        }
+      );
+    }, SEARCH_ROUTE_BUDGET_MS, 'Search took too long. Try a narrower query or add Tavily/SearxNG for more reliable hosted research.');
   } catch (error) {
     console.error('Search API error:', error);
     const message = error instanceof Error ? error.message : 'Search failed';
-    const status = message.includes('TAVILY_API_KEY') ? 503 : 500;
+    const status = message.includes('took too long') ? 504 : message.includes('TAVILY_API_KEY') ? 503 : 500;
     return Response.json({ error: message }, { status });
   }
 }
@@ -105,6 +112,7 @@ async function buildResearchPlan(
     apiKey: options.apiKey,
     preferredModel: options.model,
     deep: options.deep,
+    timeoutMs: RESEARCH_PLANNER_BUDGET_MS,
   });
   if (modelPlan?.queries.length) {
     return {
@@ -118,6 +126,20 @@ async function buildResearchPlan(
     ...planResearchQueries(query, { deep: options.deep }),
     planner: 'heuristic',
   };
+}
+
+async function withTimeout<T>(run: () => Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      run(),
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function getHostedSearchQuotaStatus(request: NextRequest, clientKey: string | null): HostedSearchQuota {

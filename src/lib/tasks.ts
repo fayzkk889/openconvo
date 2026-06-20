@@ -165,7 +165,7 @@ function isObviouslyLocalOrPersonal(text: string): boolean {
 }
 
 function isCasualGreeting(text: string): boolean {
-  return /^(hi+|hii+|hey+|hello+|yo+|sup|thanks?|thank you|ok|okay|hmm|lol)[\s!.?]*$/i.test(text.trim());
+  return /^(hi+|hii+|hey+|hello+|yo+|sup)(?:\s+(?:there|again|friend|bro|buddy))?[\s!.?]*$|^(thanks?|thank you|ok|okay|hmm|lol)[\s!.?]*$/i.test(text.trim());
 }
 
 function looksLikeExternalDecision(text: string): boolean {

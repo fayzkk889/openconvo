@@ -8,6 +8,8 @@ import { normalizeTaskType } from '@/lib/tasks';
 import { buildResearchFallbackAnswer } from '@/lib/research-fallback';
 import { ensureResearchCitations } from '@/lib/research-citations';
 
+export const maxDuration = 60;
+
 const MAX_MESSAGES = 100;
 const MAX_MESSAGE_CHARS = 50000;
 const MAX_CONTEXT_ITEMS = 10;

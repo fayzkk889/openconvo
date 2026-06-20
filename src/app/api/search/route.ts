@@ -54,11 +54,15 @@ export async function POST(request: NextRequest) {
 
     return await withTimeout(async () => {
       const searchMode = mode === 'deep-research' ? 'deep-research' : mode === 'research' ? 'research' : 'search';
+      const initialSearch = searchMode !== 'search'
+        ? await searchWeb(trimmedQuery, key, 'search')
+        : null;
       const researchPlan = searchMode !== 'search'
         ? await buildResearchPlan(trimmedQuery, {
           deep: searchMode === 'deep-research',
           apiKey: openrouterKey,
           model: typeof model === 'string' ? model : undefined,
+          planningContext: initialSearch?.results,
         })
         : null;
       const results = researchPlan
@@ -106,13 +110,19 @@ function getClientOpenRouterKey(request: NextRequest): string | null {
 
 async function buildResearchPlan(
   query: string,
-  options: { deep: boolean; apiKey?: string | null; model?: string }
+  options: {
+    deep: boolean;
+    apiKey?: string | null;
+    model?: string;
+    planningContext?: Array<{ title: string; url: string; snippet?: string }>;
+  }
 ): Promise<{ queries: string[]; entities?: string[]; planner: 'model' | 'heuristic' }> {
   const modelPlan = await generateResearchPlan(query, {
     apiKey: options.apiKey,
     preferredModel: options.model,
     deep: options.deep,
     timeoutMs: RESEARCH_PLANNER_BUDGET_MS,
+    planningContext: options.planningContext,
   });
   if (modelPlan?.queries.length) {
     return {

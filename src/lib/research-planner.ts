@@ -320,6 +320,7 @@ function socialTrendQueries(analysis: ResearchAnalysis): string[] {
 }
 
 function constraintQueries(analysis: ResearchAnalysis): string[] {
+  if (!analysis.intent.purchase) return [];
   const constraintQuery = buildConstraintSearchQuery(analysis.originalQuery);
   if (!constraintQuery) return [];
   return [

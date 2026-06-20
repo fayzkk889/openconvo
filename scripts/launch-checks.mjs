@@ -72,10 +72,12 @@ check('hosted search quota commits after search success', /commitHostedSearchQuo
 check('hosted search quota has response headers', /X-OpenConvo-Search-Limit/.test(searchRoute) && /X-OpenConvo-Search-Remaining/.test(searchRoute));
 check('search route exposes provider metadata', /X-OpenConvo-Search-Provider/.test(searchRoute));
 check('search route has bounded serverless budget', /export const maxDuration = 60/.test(searchRoute) && /SEARCH_ROUTE_BUDGET_MS/.test(searchRoute) && /RESEARCH_PLANNER_BUDGET_MS/.test(searchRoute));
+check('chat route has bounded serverless budget', /export const maxDuration = 60/.test(chatRoute));
 check('web search has provider fallback', /SearchProvider/.test(searchLib) && /tavilyProvider/.test(searchLib) && /duckDuckGoProvider/.test(searchLib));
 check('keyless search has secondary HTML fallbacks', /DUCKDUCKGO_LITE/.test(searchLib) && /duckDuckGoLiteProvider/.test(searchLib) && /BING_SEARCH/.test(searchLib) && /bingHtmlProvider/.test(searchLib) && /parseDuckDuckGoHtml/.test(searchLib));
 check('research search aggregates multiple providers', /providerResults/.test(searchLib) && /mode === 'search'/.test(searchLib) && /providers/.test(searchLib));
-check('social trend research seeds public snapshot sources', /seededReferenceResults/.test(searchLib) && /trends24\.in/.test(searchLib) && /twitter-trends\.snaplytics/.test(searchLib));
+check('source seeds are fallback-only, not always injected', /shouldUseSeededFallback/.test(searchLib) && /seededReferenceResults/.test(searchLib));
+check('trend seed location extraction handles planner query shapes', /topicMatches/.test(searchLib) && /tracker\|trends\?\|topics\?\|hashtags\?/.test(searchLib));
 check('research source diversification enforces host caps', /MIN_DIVERSIFIED_RESULTS/.test(searchLib) && /selected\.size >= MIN_DIVERSIFIED_RESULTS/.test(searchLib) && !/for \(const result of comparisonResults\) \{\s*selected\.set\(canonicalUrlKey\(result\.url\), result\);\s*\}/.test(searchLib));
 check('web search supports optional SearxNG', /searxngProvider/.test(searchLib) && /SEARXNG_URL/.test(searchLib));
 check('web search providers have timeouts and cache', /SEARCH_TIMEOUT_MS/.test(searchLib) && /withTimeout/.test(searchLib) && /searchCache/.test(searchLib));
@@ -86,6 +88,7 @@ check('search and extraction strip tracking params', /TRACKING_QUERY_PARAMS/.tes
 check('search dedupes repeated titles from the same host', /seenTitleHosts/.test(searchLib) && /normalizeDedupeTitle/.test(searchLib));
 check('research mode plans multiple queries', /planResearchQueries/.test(searchRoute) && /searchWebMany/.test(searchLib) && /MAX_PLANNED_QUERIES\s*=\s*8/.test(researchPlanner));
 check('research mode uses model planner before heuristic fallback', /generateResearchPlan/.test(searchRoute) && /planner:\s*'model'/.test(searchRoute) && /planner:\s*'heuristic'/.test(searchRoute));
+check('research planning can use initial search context', /planningContext/.test(searchRoute) && /formatPlanningContext/.test(openrouter));
 check('auto mode has broad web research triggers', /needsWebResearch/.test(tasks) && /latest\|current/.test(tasks) && /looksLikeExternalDecision/.test(tasks));
 check('auto mode keeps casual greetings out of research', /isCasualGreeting/.test(tasks) && /return 'quick'/.test(tasks));
 check('auto mode routes social trends to research', /trending\|trends\|viral/.test(tasks) && /twitter\|x\\\.com\|reddit/.test(tasks));
@@ -97,6 +100,7 @@ check('research planner handles comparisons without topic dictionaries', /extrac
 check('research planner strips generic question frames', /stripQuestionFrame/.test(researchPlanner) && /which\|what/.test(researchPlanner) && /should\|can\|could/.test(researchPlanner));
 check('research planner extracts latest-development topics', /extractKnowledgeTopic/.test(researchPlanner) && /knowledgeNewsQueries/.test(researchPlanner));
 check('research planner handles purchase constraints generically', /buildConstraintSearchQuery/.test(researchPlanner) && /extractPurchaseSubjects/.test(researchPlanner) && /extractBudgetConstraint/.test(researchPlanner));
+check('research planner gates constraint queries behind purchase intent', /if \(!analysis\.intent\.purchase\) return \[\]/.test(researchPlanner));
 check('research planner derives market scope from currency', /extractMarketScope/.test(researchPlanner) && /inr/.test(researchPlanner) && /India/.test(researchPlanner));
 check('research planner handles live events generically', /liveEvent/.test(researchPlanner) && /extractNamedSubjects/.test(researchPlanner) && /official schedule fixtures results/.test(researchPlanner));
 check('research planner handles social trends generically', /socialTrend/.test(researchPlanner) && /trend tracker snapshot/.test(researchPlanner) && /trending hashtags topics/.test(researchPlanner));
@@ -134,6 +138,7 @@ check('markdown tables remain contained', /overflow-x: auto/.test(globals) && /v
 check('chat stream stalls are bounded and recoverable', /CHAT_STREAM_IDLE_TIMEOUT_MS/.test(chatRoute) && /readStreamChunkWithTimeout/.test(chatRoute) && /did not stream a response in time/.test(chatRoute));
 check('client search and title requests have timeouts', /SEARCH_REQUEST_TIMEOUT_MS/.test(useChat) && /TITLE_REQUEST_TIMEOUT_MS/.test(useChat) && /fetchWithTimeout/.test(useChat));
 check('research retries progressively shrink context', /RESEARCH_RETRY_SOURCE_LIMITS/.test(useChat) && /compactSearchResultsForAttempt/.test(useChat) && /MAX_SOURCE_CONTENT_CHARS/.test(prompts) && /MAX_SEARCH_CONTENT_CHARS/.test(chatRoute));
+check('quick tasks bypass external search even when toggles are on', /isQuickTask/.test(useChat) && /!isQuickTask && \(searchEnabled \|\| researchEnabled \|\| isResearchTask\)/.test(useChat));
 check('local conversation titles are summarized, not raw first prompts', /buildConversationTitle/.test(titleLib) && /buildComparisonTitle/.test(titleLib) && /buildPurchaseTitle/.test(titleLib) && /buildFeatureTitle/.test(titleLib) && /buildConversationTitle/.test(useChat) && /buildConversationTitle/.test(openrouter) && !/function buildLocalTitle/.test(useChat));
 check('research reports are extracted as artifacts', /extractResearchReportArtifact/.test(artifactsLib) && /Research Evidence/.test(artifactsLib));
 check('artifacts can be exported directly', /handleDownload/.test(read('src/components/artifact-panel.tsx')) && /artifactExtension/.test(read('src/components/artifact-panel.tsx')));

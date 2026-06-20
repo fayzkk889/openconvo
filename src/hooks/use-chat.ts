@@ -115,8 +115,9 @@ export function useChat(
       // Perform web search if enabled
       let searchResults: SearchResponse | null = null;
       const isResearchTask = taskType === 'research' || taskType === 'deep-research';
-      const shouldUseSearch = searchEnabled || researchEnabled || isResearchTask;
-      const shouldUseResearch = researchEnabled || isResearchTask;
+      const isQuickTask = taskType === 'quick';
+      const shouldUseSearch = !isQuickTask && (searchEnabled || researchEnabled || isResearchTask);
+      const shouldUseResearch = !isQuickTask && (researchEnabled || isResearchTask);
       const searchMode = taskType === 'deep-research' ? 'deep-research' : shouldUseResearch ? 'research' : 'search';
       if (shouldUseSearch) {
         try {

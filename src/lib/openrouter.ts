@@ -215,6 +215,7 @@ export async function generateResearchPlan(
     preferredModel?: string;
     deep?: boolean;
     timeoutMs?: number;
+    planningContext?: Array<{ title: string; url: string; snippet?: string }>;
   }
 ): Promise<GeneratedResearchPlan | null> {
   const normalizedQuery = query.replace(/\s+/g, ' ').trim().slice(0, 500);
@@ -228,6 +229,7 @@ export async function generateResearchPlan(
         'You are a search query planner for a web research assistant.',
         'Create generic web search queries for ANY user topic. Do not rely on topic-specific rules.',
         'Extract the key entities, products, people, places, constraints, dates, and comparison sides from the user request.',
+        'When search context is provided, use it to avoid dictionary/word-sense drift and to focus follow-up queries on the actual topic.',
         'Return ONLY valid JSON in this exact shape: {"queries":["..."],"entities":["..."]}.',
         `Use ${maxQueries} or fewer queries. Queries should be short, precise, and searchable.`,
         'Prefer official/source/price/review/spec/news terms only when they match the user intent.',
@@ -236,6 +238,13 @@ export async function generateResearchPlan(
     },
     { role: 'user', content: normalizedQuery },
   ];
+  const contextText = formatPlanningContext(options?.planningContext || []);
+  if (contextText) {
+    plannerMessages.push({
+      role: 'user',
+      content: `Initial search context:\n${contextText}\n\nPlan better follow-up searches for the original request above.`,
+    });
+  }
 
   const modelsToTry = [
     options?.preferredModel,
@@ -272,6 +281,17 @@ export async function generateResearchPlan(
   }
 
   return null;
+}
+
+function formatPlanningContext(results: Array<{ title: string; url: string; snippet?: string }>): string {
+  return results
+    .slice(0, 5)
+    .map((result, index) => {
+      const snippet = result.snippet?.replace(/\s+/g, ' ').trim().slice(0, 220) || '';
+      return `${index + 1}. ${result.title}\n${result.url}${snippet ? `\n${snippet}` : ''}`;
+    })
+    .join('\n\n')
+    .slice(0, 1800);
 }
 
 function cleanGeneratedTitle(title: string): string {

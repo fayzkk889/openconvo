@@ -119,12 +119,15 @@ export async function searchWebMany(
     plannedQueries.map((query) => searchWeb(query, clientKey, mode))
   );
   const rankingQuery = plannedQueries.join(' ');
-  const seededResults = seededReferenceResults(rankingQuery);
+  const rawRankedResults = rankSearchResults(
+    dedupeResults(responses.flatMap((response) => response.results)),
+    rankingQuery
+  );
+  const seededResults = shouldUseSeededFallback(rawRankedResults)
+    ? seededReferenceResults(rankingQuery)
+    : [];
   const rankedResults = rankSearchResults(
-    dedupeResults([
-      ...seededResults,
-      ...responses.flatMap((response) => response.results),
-    ]),
+    dedupeResults([...rawRankedResults, ...seededResults]),
     rankingQuery
   );
   const results = diversifyResearchResults(rankedResults, rankingQuery, entities)
@@ -383,6 +386,11 @@ function seededReferenceResults(query: string): SearchResult[] {
   ];
 }
 
+function shouldUseSeededFallback(results: SearchResult[]): boolean {
+  if (results.length === 0) return true;
+  return !results.some((result) => (result.sourceScore || 0) >= 48);
+}
+
 function seededTrendResults(query: string): SearchResult[] {
   if (!/\b(twitter|x\.com|x|trending|trends|hashtags?)\b/i.test(query)) return [];
   if (!/\b(twitter|x\.com|x)\b/i.test(query)) return [];
@@ -494,7 +502,10 @@ function extractTrendLocationSlug(query: string): string {
   const matches = Array.from(normalized.matchAll(/\b(?:in|for|around)\s+([a-z][a-z\s-]{1,40}?)(?:\s+(?:today|now|currently|this week|this month|with|and|twitter|x|trends?|trending|hashtags?)\b|$)/g))
     .map((match) => (match[1] || '').trim())
     .filter(Boolean);
-  const location = matches[matches.length - 1] || '';
+  const topicMatches = Array.from(normalized.matchAll(/\b(?:tracker|trends?|topics?|hashtags?)\s+([a-z][a-z\s-]{1,40}?)(?:\s+(?:today|now|currently|this week|this month)\b|$)/g))
+    .map((match) => (match[1] || '').trim())
+    .filter(Boolean);
+  const location = matches[matches.length - 1] || topicMatches[topicMatches.length - 1] || '';
   if (!location || /^(twitter|x|reddit|instagram|youtube|tiktok|social media)$/.test(location)) return '';
   return location
     .split(/\s+/)

@@ -74,8 +74,10 @@ check('web extraction blocks local network fetches', /isBlockedHostname/.test(we
 check('web extraction caches fetched pages', /pageCache/.test(webExtract) && /PAGE_CACHE_TTL_MS/.test(webExtract));
 check('research mode plans multiple queries', /planResearchQueries/.test(searchRoute) && /searchWebMany/.test(searchLib) && /MAX_PLANNED_QUERIES\s*=\s*8/.test(researchPlanner));
 check('auto mode has broad web research triggers', /needsWebResearch/.test(read('src/lib/tasks.ts')) && /latest\|current/.test(read('src/lib/tasks.ts')) && /looksLikeExternalDecision/.test(read('src/lib/tasks.ts')));
-check('research planner builds generic entity evidence queries', /extractResearchEntities/.test(researchPlanner) && /entityEvidenceQueries/.test(researchPlanner) && /official pricing/.test(researchPlanner));
-check('research planner extracts product subjects from feature questions', /extractSubjectPhrases/.test(researchPlanner) && /features\|specs\|specifications/.test(researchPlanner) && /normalizeEntityPhrase/.test(researchPlanner));
+check('research planner uses generic query analysis', /analyzeResearchQuery/.test(researchPlanner) && /inferResearchIntent/.test(researchPlanner) && /extractCandidateSubjects/.test(researchPlanner));
+check('research planner avoids topic-specific subject hardcoding', !/OpenAI|ChatGPT|Claude|Anthropic|Continental|GT 650|Supabase|Firebase/.test(researchPlanner));
+check('research planner decomposes by intent and subject', /subjectQueries/.test(researchPlanner) && /intentQueries/.test(researchPlanner) && /STOP_WORDS/.test(researchPlanner));
+check('research planner handles comparisons without topic dictionaries', /extractComparisonSubjects/.test(researchPlanner) && /stripAudienceContext/.test(researchPlanner));
 check('deep research mode expands query and source depth', /deep-research/.test(searchRoute) && /MAX_DEEP_PLANNED_QUERIES/.test(researchPlanner) && /maxCombinedResultsForMode/.test(searchLib));
 check('research trace is saved on messages', /researchTrace/.test(useChat) && /buildResearchTrace/.test(useChat));
 check('research trace renders in source panel', /Research trace/.test(messageComponent) && /plannedQueries/.test(messageComponent));

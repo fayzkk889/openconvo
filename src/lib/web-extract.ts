@@ -132,11 +132,26 @@ function isReadableContentType(contentType: string): boolean {
 function canonicalPageCacheKey(url: URL): string {
   const parsed = new URL(url.href);
   parsed.hash = '';
-  for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']) {
+  for (const key of TRACKING_QUERY_PARAMS) {
     parsed.searchParams.delete(key);
   }
   return parsed.href.toLowerCase();
 }
+
+const TRACKING_QUERY_PARAMS = [
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'fbclid',
+  'gclid',
+  'msclkid',
+  'ref',
+  'ref_src',
+  'source',
+  'os',
+];
 
 function getCachedPage(key: string): { hit: boolean; content: string | null } {
   const cached = pageCache.get(key);

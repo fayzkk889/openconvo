@@ -92,6 +92,7 @@ export function ChatArea({
 }: ChatAreaProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
   const { artifacts, updateArtifact, deleteArtifact } = useArtifacts(conversation, messages, isStreaming);
@@ -100,6 +101,7 @@ export function ChatArea({
 
   const scrollToBottom = () => {
     if (bottomRef.current) {
+      shouldStickToBottomRef.current = true;
       bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   };
@@ -109,6 +111,7 @@ export function ChatArea({
       if (!scrollRef.current) return;
       const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
       const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+      shouldStickToBottomRef.current = isNearBottom;
       setShowScrollButton(!isNearBottom);
     };
 
@@ -124,7 +127,7 @@ export function ChatArea({
   }, []);
 
   useEffect(() => {
-    if (isStreaming) {
+    if (isStreaming && shouldStickToBottomRef.current) {
       scrollToBottom();
     }
   }, [messages, isStreaming]);

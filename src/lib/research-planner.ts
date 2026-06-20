@@ -12,6 +12,7 @@ type ResearchIntent = {
   technical: boolean;
   evidence: boolean;
   purchase: boolean;
+  liveEvent: boolean;
 };
 
 type ResearchAnalysis = {
@@ -130,12 +131,17 @@ const INTENT_WORDS = new Set([
   'docs',
   'documentation',
   'features',
+  'fixtures',
   'guide',
   'launched',
   'launch',
   'limitations',
+  'losers',
+  'match',
+  'matches',
   'news',
   'official',
+  'past',
   'price',
   'pricing',
   'pros',
@@ -153,11 +159,20 @@ const INTENT_WORDS = new Set([
   'safety',
   'source',
   'sources',
+  'schedule',
+  'schedules',
+  'score',
+  'scores',
   'specification',
   'specifications',
   'specs',
+  'standings',
+  'table',
+  'tournament',
   'update',
   'updates',
+  'winner',
+  'winners',
 ]);
 
 export function planResearchQueries(query: string, options?: { deep?: boolean }): ResearchPlan {
@@ -197,6 +212,7 @@ function inferResearchIntent(query: string): ResearchIntent {
     technical: /\b(api|docs|documentation|framework|library|github|open source|opensource|developer|code|spec|specs|specification|specifications)\b/.test(lower),
     evidence: /\b(source|sources|cite|citation|research|verify|fact check|fact-check|evidence|proof)\b/.test(lower),
     purchase: /\b(buy|buying|purchase|purchasing|shop|shopping|recommend|recommendation|budget)\b/.test(lower),
+    liveEvent: /\b(schedule|schedules|fixture|fixtures|match|matches|today|tonight|live|score|scores|result|results|winner|winners|loser|losers|standings|table|bracket|tournament|cup|league|championship)\b/.test(lower),
   };
 }
 
@@ -235,6 +251,12 @@ function subjectQueries(analysis: ResearchAnalysis): string[] {
     if (analysis.intent.risk) {
       queries.push(`${subject} risks security privacy official`);
     }
+
+    if (analysis.intent.liveEvent) {
+      queries.push(`${subject} official schedule fixtures results`);
+      queries.push(`${subject} today matches results official`);
+      queries.push(`${subject} standings bracket official`);
+    }
   }
 
   return queries;
@@ -268,6 +290,11 @@ function intentQueries(analysis: ResearchAnalysis): string[] {
     queries.push(`${query} risks official documentation`);
   }
 
+  if (analysis.intent.liveEvent) {
+    queries.push(`${query} official schedule fixtures results`);
+    queries.push(`${query} live scores today fixtures`);
+  }
+
   if (queries.length === 0) {
     queries.push(`${query} overview`);
     queries.push(`${query} key facts`);
@@ -290,6 +317,7 @@ function deepResearchQueries(analysis: ResearchAnalysis): string[] {
 function extractCandidateSubjects(query: string): string[] {
   const quoted = Array.from(query.matchAll(/"([^"]{2,100})"|'([^']{2,100})'/g)).map((match) => match[1] || match[2]);
   const strippedQuery = stripQuestionFrame(query);
+  const namedSubjects = extractNamedSubjects(strippedQuery);
   const purchaseSubjects = extractPurchaseSubjects(query);
   const comparisonParts = extractComparisonSubjects(strippedQuery);
   const prepositionSubjects = Array.from(strippedQuery.matchAll(/\b(?:of|for|about|on|regarding|between)\s+([^?.,;:]{3,120})/gi))
@@ -299,6 +327,7 @@ function extractCandidateSubjects(query: string): string[] {
 
   return dedupeQueries([
     ...quoted,
+    ...namedSubjects,
     ...purchaseSubjects,
     ...comparisonParts,
     ...prepositionSubjects,
@@ -307,6 +336,25 @@ function extractCandidateSubjects(query: string): string[] {
     .map(normalizeSubject)
     .filter((subject) => subject.length >= 2)
     .filter((subject) => subject.split(/\s+/).length <= 8)
+    .slice(0, MAX_SUBJECTS);
+}
+
+function extractNamedSubjects(query: string): string[] {
+  const normalized = normalizeSubject(query);
+  const matches = Array.from(normalized.matchAll(
+    /\b(?:[A-Z]{2,}(?:\s+(?:\d{2,4}|[A-Z][A-Za-z0-9-]+))*|[A-Z][A-Za-z0-9-]+(?:\s+(?:[A-Z][A-Za-z0-9-]+|\d{2,4})){1,5})\b/g
+  )).map((match) => cleanSubject(match[0] || ''));
+
+  const acronymWithYear = Array.from(normalized.matchAll(/\b([A-Z]{2,})\s*(20\d{2}|19\d{2})\b/g))
+    .map((match) => cleanSubject(`${match[1]} ${match[2]}`));
+
+  const eventWithYear = Array.from(normalized.matchAll(/\b([A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z][A-Za-z0-9-]*){0,4})\s+(20\d{2}|19\d{2})\b/g))
+    .map((match) => cleanSubject(`${match[1]} ${match[2]}`))
+    .filter((subject) => /\b(cup|league|championship|tournament|open|world|series|season|conference|summit|expo|election|budget)\b/i.test(subject));
+
+  return dedupeQueries([...acronymWithYear, ...eventWithYear, ...matches])
+    .filter((subject) => subject.length >= 2)
+    .filter((subject) => subject.split(/\s+/).length <= 6)
     .slice(0, MAX_SUBJECTS);
 }
 

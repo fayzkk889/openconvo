@@ -45,6 +45,7 @@ export async function searchWeb(
     clientTavilyKey: clientKey,
   };
   const providerErrors: string[] = [];
+  const providerResults: SearchProviderResult[] = [];
 
   for (const provider of getSearchProviders()) {
     if (!provider.available(context)) continue;
@@ -55,19 +56,40 @@ export async function searchWeb(
         `${provider.id} timed out`
       );
       if (result.results.length > 0 || result.answer) {
-        const response = {
-          query,
-          answer: result.answer,
-          provider: result.provider,
-          mode,
-          results: rankSearchResults(dedupeResults(result.results), query).slice(0, maxResultsForMode(mode)),
-        };
-        setCachedSearch(cacheKey, response);
-        return response;
+        providerResults.push(result);
+        if (mode === 'search') {
+          const response = {
+            query,
+            answer: result.answer,
+            provider: result.provider,
+            mode,
+            results: rankSearchResults(dedupeResults(result.results), query).slice(0, maxResultsForMode(mode)),
+          };
+          setCachedSearch(cacheKey, response);
+          return response;
+        }
       }
     } catch (error) {
       providerErrors.push(`${provider.id}: ${error instanceof Error ? error.message : 'failed'}`);
     }
+  }
+
+  if (providerResults.length > 0) {
+    const providers = Array.from(new Set(providerResults.map((result) => result.provider)));
+    const response = {
+      query,
+      answer: providerResults.find((result) => result.answer)?.answer,
+      provider: providers[0] || 'unknown',
+      providers,
+      mode,
+      results: rankSearchResults(
+        dedupeResults(providerResults.flatMap((result) => result.results)),
+        query
+      ).slice(0, maxResultsForMode(mode)),
+      providerErrors,
+    };
+    setCachedSearch(cacheKey, response);
+    return response;
   }
 
   return {
@@ -89,8 +111,9 @@ export async function searchWebMany(
   const responses = await Promise.all(
     plannedQueries.map((query) => searchWeb(query, clientKey, mode))
   );
-  const rankedResults = rankSearchResults(dedupeResults(responses.flatMap((response) => response.results)), plannedQueries[0] || '');
-  const results = diversifyResearchResults(rankedResults, plannedQueries[0] || '', entities)
+  const rankingQuery = plannedQueries.join(' ');
+  const rankedResults = rankSearchResults(dedupeResults(responses.flatMap((response) => response.results)), rankingQuery);
+  const results = diversifyResearchResults(rankedResults, rankingQuery, entities)
     .slice(0, maxCombinedResultsForMode(mode));
   const providers = Array.from(new Set(responses.flatMap((response) =>
     response.provider ? [response.provider] : []
@@ -285,6 +308,9 @@ function normalizeHttpUrl(value: string): string | null {
   try {
     const url = new URL(value);
     if (!['http:', 'https:'].includes(url.protocol)) return null;
+    for (const key of TRACKING_QUERY_PARAMS) {
+      url.searchParams.delete(key);
+    }
     return url.href;
   } catch {
     return null;
@@ -305,7 +331,7 @@ function canonicalUrlKey(url: string): string {
   try {
     const parsed = new URL(url);
     parsed.hash = '';
-    for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']) {
+    for (const key of TRACKING_QUERY_PARAMS) {
       parsed.searchParams.delete(key);
     }
     return parsed.href.toLowerCase();
@@ -313,6 +339,21 @@ function canonicalUrlKey(url: string): string {
     return url.toLowerCase();
   }
 }
+
+const TRACKING_QUERY_PARAMS = [
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'fbclid',
+  'gclid',
+  'msclkid',
+  'ref',
+  'ref_src',
+  'source',
+  'os',
+];
 
 function maxResultsForMode(mode: SearchMode): number {
   if (mode === 'deep-research') return 10;

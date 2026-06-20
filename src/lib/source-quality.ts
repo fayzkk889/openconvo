@@ -6,7 +6,6 @@ const PRIMARY_HOST_PATTERNS = [
   /(^|\.)github\.com$/i,
   /(^|\.)arxiv\.org$/i,
   /(^|\.)who\.int$/i,
-  /(^|\.)wikipedia\.org$/i,
   /(^|\.)openai\.com$/i,
   /(^|\.)anthropic\.com$/i,
   /(^|\.)claude\.com$/i,
@@ -21,12 +20,22 @@ const PRIMARY_HOST_PATTERNS = [
 ];
 
 const OFFICIAL_PATH_HINTS = [
+  'competition',
+  'competitions',
   'docs',
   'documentation',
   'developer',
   'api',
   'reference',
   'guide',
+  'fixtures',
+  'matches',
+  'match-centre',
+  'match-center',
+  'results',
+  'schedule',
+  'scores',
+  'standings',
   'blog',
   'news',
   'releases',
@@ -50,6 +59,8 @@ const LOW_SIGNAL_HOST_HINTS = [
   'digitalapplied.',
   'codingfleet.',
   'mindstudio.',
+  'fanrecap.',
+  'rumor.',
 ];
 
 export function rankSearchResults(results: SearchResult[], query: string): SearchResult[] {
@@ -68,8 +79,15 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   const reasons: string[] = [];
   let score = 50;
   const isPrimaryHost = PRIMARY_HOST_PATTERNS.some((pattern) => pattern.test(host));
+  const isExactTopicHost = queryTerms.some((term) =>
+    host === `${term}.com` ||
+    host === `${term}.org` ||
+    host === `${term}.net` ||
+    host.startsWith(`${term}.`)
+  );
   const lowerQuery = query.toLowerCase();
   const needsPrimaryEvidence = /\b(price|cost|pricing|stock|market|funding|revenue|law|legal|regulation|policy|medical|health|safety|release|released|launch|available|availability|official|docs|documentation|api|model|models)\b/.test(lowerQuery);
+  const needsLiveEventEvidence = /\b(schedule|schedules|fixture|fixtures|match|matches|today|tonight|live|score|scores|result|results|winner|winners|loser|losers|standings|table|bracket|tournament|cup|league|championship)\b/.test(lowerQuery);
   const looksLikeComparisonContent = /\b(vs|versus|benchmark|benchmarks|compared|wins?|showdown)\b/.test(haystack);
 
   if (isPrimaryHost) {
@@ -79,12 +97,17 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
 
   if (OFFICIAL_PATH_HINTS.some((hint) => path.includes(hint))) {
     score += 8;
-    reasons.push('documentation/news path');
+    reasons.push('official/info path');
   }
 
   if (host && queryTerms.some((term) => host.includes(term))) {
     score += 8;
     reasons.push('domain matches topic');
+  }
+
+  if (isExactTopicHost) {
+    score += 18;
+    reasons.push('exact topic domain');
   }
 
   if (overlap > 0) {
@@ -95,6 +118,16 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   if (result.extracted || result.content) {
     score += 6;
     reasons.push('readable content available');
+  }
+
+  if (needsLiveEventEvidence && /\b(schedule|fixtures?|matches|results?|scores?|standings|bracket)\b/.test(haystack)) {
+    score += 14;
+    reasons.push('event data terms');
+  }
+
+  if (needsLiveEventEvidence && /\b(official|federation|association|governing|organizer|tournament)\b/.test(haystack)) {
+    score += 8;
+    reasons.push('event authority terms');
   }
 
   if (LOW_SIGNAL_HOST_HINTS.some((hint) => host.includes(hint))) {
@@ -110,6 +143,11 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   if (needsPrimaryEvidence && looksLikeComparisonContent && !isPrimaryHost) {
     score -= 10;
     reasons.push('comparison page, not primary evidence');
+  }
+
+  if (needsLiveEventEvidence && LOW_SIGNAL_HOST_HINTS.some((hint) => host.includes(hint))) {
+    score -= 10;
+    reasons.push('low-signal event source');
   }
 
   if (!result.snippet && !result.content) {

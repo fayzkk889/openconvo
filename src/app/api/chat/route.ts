@@ -6,6 +6,7 @@ import { SearchResult } from '@/types/search';
 import { Attachment, TaskType } from '@/types/chat';
 import { normalizeTaskType } from '@/lib/tasks';
 import { buildResearchFallbackAnswer } from '@/lib/research-fallback';
+import { ensureResearchCitations } from '@/lib/research-citations';
 
 const MAX_MESSAGES = 100;
 const MAX_MESSAGE_CHARS = 50000;
@@ -168,6 +169,13 @@ export async function POST(request: NextRequest) {
               buffer += decoder.decode();
               if (buffer.trim()) {
                 emitSseLine(buffer);
+              }
+              if (emittedContent.trim() && researchMode && searchResults?.length) {
+                const finalContent = ensureResearchCitations(emittedContent, searchResults);
+                const citationTail = finalContent.slice(emittedContent.trim().length);
+                if (citationTail.trim()) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: citationTail, model: usedModel, citations: true })}\n\n`));
+                }
               }
               if (!emittedContent.trim() && researchMode && searchResults?.length) {
                 const fallback = buildResearchFallbackAnswer({

@@ -8,6 +8,7 @@ import { SearchResponse } from '@/types/search';
 import * as storage from '@/lib/storage';
 import { generateId } from '@/lib/utils';
 import { buildResearchFallbackAnswer } from '@/lib/research-fallback';
+import { ensureResearchCitations } from '@/lib/research-citations';
 
 const STREAM_FLUSH_MS = 18;
 const STREAM_FINISH_BUDGET_MS = 900;
@@ -289,12 +290,16 @@ export function useChat(
               throw new Error('The model returned an empty response. Please try again.');
             }
 
-            await streamDisplay?.finish(fullContent);
-            if (!firstResponseContent) firstResponseContent = fullContent;
+            const finalContentWithCitations = shouldUseResearch
+              ? ensureResearchCitations(fullContent, placeholderMessage.searchResults)
+              : fullContent;
+
+            await streamDisplay?.finish(finalContentWithCitations);
+            if (!firstResponseContent) firstResponseContent = finalContentWithCitations;
 
             await storage.addMessage(conversationId, {
               role: 'assistant',
-              content: fullContent,
+              content: finalContentWithCitations,
               model: finalModel,
               researchMode: shouldUseResearch,
               agentMode: agentEnabled === true,
@@ -570,11 +575,15 @@ export function useChat(
           throw new Error('The model returned an empty response. Please try again.');
         }
 
-        await streamDisplay?.finish(fullContent);
+        const finalContentWithCitations = targetMessage.researchMode
+          ? ensureResearchCitations(fullContent, targetMessage.searchResults)
+          : fullContent;
+
+        await streamDisplay?.finish(finalContentWithCitations);
 
         await storage.addMessage(conversationId, {
           role: 'assistant',
-          content: fullContent,
+          content: finalContentWithCitations,
           model: finalModel,
           researchMode: targetMessage.researchMode,
           agentMode: targetMessage.agentMode,

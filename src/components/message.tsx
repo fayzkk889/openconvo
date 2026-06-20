@@ -168,6 +168,19 @@ export function Message({
                     <span>Preparing the response</span>
                   </div>
                 </div>
+              ) : message.researchMode ? (
+                <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3 text-xs text-[var(--color-text-secondary)]">
+                  <div className="mb-2 flex items-center gap-2 font-semibold text-[var(--color-text-primary)]">
+                    <Microscope className="h-3.5 w-3.5" />
+                    Drafting from sources
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-text-tertiary)]" />
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-text-tertiary)] [animation-delay:120ms]" />
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-text-tertiary)] [animation-delay:240ms]" />
+                    <span>Free models can take a moment. Sources will be attached.</span>
+                  </div>
+                </div>
               ) : (
                 <div className="flex items-center gap-1.5 py-2">
                   <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-text-tertiary)]" />

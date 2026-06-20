@@ -88,7 +88,8 @@ export async function searchWebMany(
   const responses = await Promise.all(
     plannedQueries.map((query) => searchWeb(query, clientKey, mode))
   );
-  const results = rankSearchResults(dedupeResults(responses.flatMap((response) => response.results)), plannedQueries[0] || '')
+  const rankedResults = rankSearchResults(dedupeResults(responses.flatMap((response) => response.results)), plannedQueries[0] || '');
+  const results = diversifyComparisonResults(rankedResults, plannedQueries[0] || '')
     .slice(0, maxCombinedResultsForMode(mode));
   const providers = Array.from(new Set(responses.flatMap((response) =>
     response.provider ? [response.provider] : []
@@ -320,6 +321,70 @@ function maxResultsForMode(mode: SearchMode): number {
 function maxCombinedResultsForMode(mode: SearchMode): number {
   if (mode === 'deep-research') return 18;
   return mode === 'research' ? 12 : 6;
+}
+
+function diversifyComparisonResults(results: SearchResult[], query: string): SearchResult[] {
+  const lower = query.toLowerCase();
+  const needsOpenAI = /\b(openai|gpt|codex|chatgpt)\b/.test(lower);
+  const needsAnthropic = /\b(anthropic|claude|opus|sonnet|haiku|claude code)\b/.test(lower);
+  if (!needsOpenAI || !needsAnthropic) return results;
+
+  const openaiResults = results.filter((result) => sourceFamily(result.url) === 'openai').slice(0, 4);
+  const anthropicResults = results.filter((result) => sourceFamily(result.url) === 'anthropic').slice(0, 4);
+  const selected = new Map<string, SearchResult>();
+  const queryWantsCodex = /\bcodex\b/.test(lower);
+  const queryWantsGpt = /\bgpt\s*-?\s*5|gpt5\b/.test(lower);
+  const queryWantsClaudeCode = /\bclaude code\b/.test(lower);
+  const queryWantsOpus = /\bopus\b/.test(lower);
+  const opusVersion = lower.match(/\bopus\s*4(?:\.|-)?8\b/)?.[0];
+
+  addRepresentativeResult(selected, results, queryWantsCodex, 'openai', /\bcodex\b/i);
+  addRepresentativeResult(selected, results, queryWantsGpt, 'openai', /\bgpt\s*-?\s*5|gpt5\b/i);
+  addRepresentativeResult(selected, results, queryWantsClaudeCode, 'anthropic', /\bclaude code\b/i);
+  addRepresentativeResult(selected, results, Boolean(opusVersion), 'anthropic', /\bopus\s*4(?:\.|-)?8\b/i);
+  addRepresentativeResult(selected, results, queryWantsOpus, 'anthropic', /\bopus\b/i);
+
+  for (let index = 0; index < Math.max(openaiResults.length, anthropicResults.length); index += 1) {
+    if (openaiResults[index]) selected.set(canonicalUrlKey(openaiResults[index].url), openaiResults[index]);
+    if (anthropicResults[index]) selected.set(canonicalUrlKey(anthropicResults[index].url), anthropicResults[index]);
+  }
+
+  for (const result of results) {
+    selected.set(canonicalUrlKey(result.url), result);
+  }
+
+  return Array.from(selected.values());
+}
+
+function addRepresentativeResult(
+  selected: Map<string, SearchResult>,
+  results: SearchResult[],
+  shouldAdd: boolean,
+  family: 'openai' | 'anthropic',
+  pattern: RegExp
+): void {
+  if (!shouldAdd) return;
+  const result = results.find((item) =>
+    sourceFamily(item.url) === family &&
+    pattern.test(`${item.title} ${item.snippet} ${item.url}`)
+  );
+  if (result) {
+    selected.set(canonicalUrlKey(result.url), result);
+  }
+}
+
+function sourceFamily(url: string): 'openai' | 'anthropic' | 'other' {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+    if (host === 'openai.com' || host.endsWith('.openai.com')) return 'openai';
+    if (host === 'github.com' && url.toLowerCase().includes('/openai/')) return 'openai';
+    if (host === 'anthropic.com' || host.endsWith('.anthropic.com') || host === 'claude.com' || host.endsWith('.claude.com')) {
+      return 'anthropic';
+    }
+  } catch {
+    return 'other';
+  }
+  return 'other';
 }
 
 async function withTimeout<T>(

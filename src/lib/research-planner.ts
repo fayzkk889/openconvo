@@ -3,7 +3,7 @@ export type ResearchPlan = {
   queries: string[];
 };
 
-const MAX_PLANNED_QUERIES = 4;
+const MAX_PLANNED_QUERIES = 8;
 const MAX_DEEP_PLANNED_QUERIES = 7;
 
 export function planResearchQueries(query: string, options?: { deep?: boolean }): ResearchPlan {
@@ -26,7 +26,7 @@ function intentQueries(query: string): string[] {
   const lower = query.toLowerCase();
   const queries: string[] = [];
 
-  if (/\b(gpt|openai|claude|anthropic|gemini|google|llama|meta|mistral|cohere|model|models|pricing|price|cost)\b/.test(lower)) {
+  if (/\b(gpt|openai|codex|chatgpt|claude|anthropic|opus|sonnet|haiku|claude code|gemini|google|llama|meta|mistral|cohere|model|models|pricing|price|cost|pocket friendly)\b/.test(lower)) {
     queries.push(...modelOfficialQueries(lower));
   }
 
@@ -57,28 +57,47 @@ function intentQueries(query: string): string[] {
 }
 
 function modelOfficialQueries(lowerQuery: string): string[] {
-  const queries: string[] = [];
+  const specificQueries: string[] = [];
+  const generalQueries: string[] = [];
 
-  if (/\b(gpt|openai)\b/.test(lowerQuery)) {
-    queries.push('OpenAI models pricing official');
-    queries.push('OpenAI model documentation official');
+  if (/\b(gpt|openai|codex|chatgpt)\b/.test(lowerQuery)) {
+    if (/\bcodex\b/.test(lowerQuery)) {
+      specificQueries.push('OpenAI Codex official documentation');
+      specificQueries.push('ChatGPT Codex official');
+    }
+    if (/\bgpt\s*-?\s*5|gpt5\b/.test(lowerQuery)) {
+      specificQueries.push('OpenAI GPT-5 official documentation');
+    }
+    generalQueries.push('OpenAI models pricing official');
+    generalQueries.push('OpenAI model documentation official');
   }
 
-  if (/\b(claude|anthropic)\b/.test(lowerQuery)) {
-    queries.push('Anthropic Claude models pricing official');
-    queries.push('Anthropic Claude documentation official');
+  if (/\b(claude|anthropic|opus|sonnet|haiku)\b/.test(lowerQuery)) {
+    if (/\bclaude code\b/.test(lowerQuery)) {
+      specificQueries.push('Anthropic Claude Code official documentation');
+    }
+    if (/\bopus\b/.test(lowerQuery)) {
+      if (/\bopus\s*4(?:\.|-)?8\b/.test(lowerQuery)) {
+        specificQueries.push('Anthropic Claude Opus 4.8 official');
+      }
+      specificQueries.push('Anthropic Claude Opus official');
+      specificQueries.push('Anthropic Claude Opus pricing official');
+    }
+    generalQueries.push('Anthropic Claude models pricing official');
+    generalQueries.push('Anthropic Claude documentation official');
   }
 
   if (/\b(gemini|google)\b/.test(lowerQuery)) {
-    queries.push('Google Gemini models pricing official');
+    generalQueries.push('Google Gemini models pricing official');
   }
 
   if (/\b(llama|meta)\b/.test(lowerQuery)) {
-    queries.push('Meta Llama models official');
+    generalQueries.push('Meta Llama models official');
   }
 
+  const queries = [...specificQueries, ...generalQueries];
   return queries.length > 0
-    ? queries
+    ? dedupeQueries(queries)
     : ['AI model pricing official documentation'];
 }
 

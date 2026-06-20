@@ -68,7 +68,7 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   const reasons: string[] = [];
   let score = 50;
   const isPrimaryHost = PRIMARY_HOST_PATTERNS.some((pattern) => pattern.test(host));
-  const isModelPricingQuery = /\b(gpt|openai|claude|anthropic|gemini|model|models|pricing|price|cost)\b/.test(query.toLowerCase());
+  const isModelPricingQuery = /\b(gpt|openai|codex|chatgpt|claude|anthropic|opus|sonnet|haiku|gemini|model|models|pricing|price|cost|pocket friendly)\b/.test(query.toLowerCase());
   const looksLikeComparisonContent = /\b(vs|versus|benchmark|benchmarks|compared|wins?|showdown)\b/.test(haystack);
 
   if (isPrimaryHost) {

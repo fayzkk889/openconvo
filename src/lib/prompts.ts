@@ -33,7 +33,7 @@ export function buildSystemPrompt({
   }
 
   if (researchMode) {
-    prompt += '\n\n## Research Mode\nThe user requested a research-style answer. Be more thorough than a normal chat response: synthesize evidence, call out uncertainty, organize findings clearly, and cite sources for factual claims when sources are available. Prioritize official, primary, and high-quality sources. If the sources do not verify a named product, model, price, or claim, say that it is not verified instead of filling gaps from stale memory.';
+    prompt += '\n\n## Research Mode\nThe user requested a research-style answer. Be more thorough than a normal chat response: synthesize evidence, call out uncertainty, organize findings clearly, and cite sources for factual claims when sources are available. Prioritize official, primary, and high-quality sources. If the sources do not verify a named product, model, price, or claim, say that it is not verified instead of filling gaps from stale memory. Never use phrases like "based on my current knowledge", "as of my knowledge cutoff", or "known to me"; in research mode, the answer must be grounded in the supplied sources or explicitly marked unverified.';
   }
 
   if (taskType === 'deep-research') {
@@ -54,7 +54,7 @@ export function buildSystemPrompt({
     searchResults.forEach((result, i) => {
       prompt += `<source index="${i + 1}">\nTitle: ${result.title}\nURL: ${result.url}\n${result.sourceLabel ? `Quality: ${result.sourceLabel}${typeof result.sourceScore === 'number' ? ` (${result.sourceScore}/100)` : ''}${result.sourceReason ? ` - ${result.sourceReason}` : ''}\n` : ''}Snippet: ${result.snippet}\n${result.content ? `Content: ${result.content.slice(0, 1500)}\n` : ''}</source>\n\n`;
     });
-    prompt += 'When answering, reference the sources above where appropriate. Do not treat a search result title by itself as proof. If the search results are low-quality, speculative, contradictory, or do not directly verify the user\'s named item, clearly say so and avoid making a definitive claim.';
+    prompt += 'When answering, reference the sources above where appropriate. For any current product/model/pricing/recommendation claim, cite at least one source from the list. Do not treat a search result title by itself as proof. If the search results are low-quality, speculative, contradictory, or do not directly verify the user\'s named item, clearly say so and avoid making a definitive claim.';
   }
 
   if (attachments && attachments.length > 0) {

@@ -100,6 +100,7 @@ check('workflow starters are rendered on empty state', /WORKFLOW_STARTERS/.test(
 check('workflow starters create editable composer drafts', /workflowDraft/.test(composer) && /setContent\(workflowDraft\.starter\.prompt\)/.test(composer));
 check('workflow starter prompts cover core task modes', /research-brief/.test(workflowStarters) && /file-analysis/.test(workflowStarters) && /code-review/.test(workflowStarters) && /compare-models/.test(workflowStarters));
 check('test script is wired', packageJson.scripts?.test === 'node scripts/launch-checks.mjs');
+check('dev script matches webpack config', !/--turbopack/.test(packageJson.scripts?.dev || '') || !/webpack\s*:/.test(read('next.config.ts')));
 check('.env.example documents OpenRouter', /OPENROUTER_API_KEY/.test(envExample));
 check('.env.example documents Tavily', /TAVILY_API_KEY/.test(envExample));
 check('.env.example documents SearxNG', /SEARXNG_URL/.test(envExample));

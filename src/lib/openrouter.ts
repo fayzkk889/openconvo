@@ -1,5 +1,6 @@
 import { AIModel } from '@/types/models';
 import { CURATED_FREE_MODELS, FALLBACK_CHAIN, isFreeModelId } from './models';
+import { buildConversationTitle } from './title';
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 const OPENROUTER_REQUEST_TIMEOUT_MS = 45 * 1000;
@@ -106,6 +107,11 @@ export interface ChatMessage {
   content: string;
 }
 
+export type GeneratedResearchPlan = {
+  queries: string[];
+  entities: string[];
+};
+
 export async function streamChat(
   messages: ChatMessage[],
   model: string,
@@ -197,6 +203,67 @@ export async function generateTitle(
   return fallbackTitle(messages);
 }
 
+export async function generateResearchPlan(
+  query: string,
+  options?: {
+    apiKey?: string | null;
+    preferredModel?: string;
+    deep?: boolean;
+  }
+): Promise<GeneratedResearchPlan | null> {
+  const normalizedQuery = query.replace(/\s+/g, ' ').trim().slice(0, 500);
+  if (!normalizedQuery) return null;
+
+  const maxQueries = options?.deep ? 7 : 5;
+  const plannerMessages: ChatMessage[] = [
+    {
+      role: 'system',
+      content: [
+        'You are a search query planner for a web research assistant.',
+        'Create generic web search queries for ANY user topic. Do not rely on topic-specific rules.',
+        'Extract the key entities, products, people, places, constraints, dates, and comparison sides from the user request.',
+        'Return ONLY valid JSON in this exact shape: {"queries":["..."],"entities":["..."]}.',
+        `Use ${maxQueries} or fewer queries. Queries should be short, precise, and searchable.`,
+        'Prefer official/source/price/review/spec/news terms only when they match the user intent.',
+        'Never answer the question. Never include markdown.',
+      ].join(' '),
+    },
+    { role: 'user', content: normalizedQuery },
+  ];
+
+  const modelsToTry = [
+    options?.preferredModel,
+    ...FALLBACK_CHAIN,
+  ].filter((model, index, all): model is string =>
+    Boolean(model) && isFreeModelId(model) && all.indexOf(model) === index
+  );
+
+  for (const model of modelsToTry) {
+    try {
+      const response = await fetchOpenRouterWithTimeout({
+        model,
+        messages: plannerMessages,
+        max_tokens: 220,
+        temperature: 0.2,
+        provider: FREE_ONLY_PROVIDER_OPTIONS,
+      }, options?.apiKey);
+
+      if (!response.ok) continue;
+      const data = await response.json() as {
+        choices?: Array<{ message?: { content?: unknown } }>;
+      };
+      const content = data.choices?.[0]?.message?.content;
+      if (typeof content !== 'string') continue;
+      const parsed = parseGeneratedResearchPlan(content, maxQueries);
+      if (parsed?.queries.length) return parsed;
+    } catch {
+      // Planner generation is best-effort; deterministic planner remains the fallback.
+    }
+  }
+
+  return null;
+}
+
 function cleanGeneratedTitle(title: string): string {
   const cleaned = title
     .replace(/^["']|["']$/g, '')
@@ -208,16 +275,49 @@ function cleanGeneratedTitle(title: string): string {
 
 function fallbackTitle(messages: ChatMessage[]): string {
   const firstUserMessage = messages.find((message) => message.role === 'user')?.content || '';
-  const words = firstUserMessage
-    .replace(/[`*_#[\](){}>]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 6)
-    .join(' ');
+  return buildConversationTitle(firstUserMessage);
+}
 
-  return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'New conversation';
+function parseGeneratedResearchPlan(content: string, maxQueries: number): GeneratedResearchPlan | null {
+  const jsonText = extractJsonObject(content);
+  if (!jsonText) return null;
+
+  try {
+    const parsed = JSON.parse(jsonText) as {
+      queries?: unknown;
+      entities?: unknown;
+    };
+    const queries = normalizePlannerStrings(parsed.queries, maxQueries, 120);
+    const entities = normalizePlannerStrings(parsed.entities, 8, 80);
+    if (!queries.length) return null;
+    return { queries, entities };
+  } catch {
+    return null;
+  }
+}
+
+function extractJsonObject(content: string): string | null {
+  const trimmed = content.trim();
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) return trimmed;
+  const match = trimmed.match(/\{[\s\S]*\}/);
+  return match?.[0] || null;
+}
+
+function normalizePlannerStrings(value: unknown, maxItems: number, maxChars: number): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const normalized = item.replace(/\s+/g, ' ').trim().slice(0, maxChars);
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+    if (result.length >= maxItems) break;
+  }
+  return result;
 }
 
 export async function fetchModels(apiKey?: string | null): Promise<AIModel[]> {

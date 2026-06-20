@@ -240,6 +240,11 @@ export function Message({
                         <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">
                           {researchTrace.openedCount} opened
                         </span>
+                        {researchTrace.planner && (
+                          <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">
+                            {researchTrace.planner === 'model' ? 'model-planned' : 'fallback-planned'}
+                          </span>
+                        )}
                         {(researchTrace.providers || (researchTrace.provider ? [researchTrace.provider] : [])).map((provider) => (
                           <span key={provider} className="rounded-full border border-[var(--color-border)] px-2 py-0.5">
                             {provider}
@@ -258,6 +263,20 @@ export function Message({
                               </li>
                             ))}
                           </ol>
+                        </div>
+                      )}
+                      {researchTrace.plannedEntities && researchTrace.plannedEntities.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-tertiary)]">
+                            Entities
+                          </span>
+                          <div className="flex flex-wrap gap-1">
+                            {researchTrace.plannedEntities.map((entity) => (
+                              <span key={entity} className="rounded-full border border-[var(--color-border)] px-2 py-0.5">
+                                {entity}
+                              </span>
+                            ))}
+                          </div>
                         </div>
                       )}
                       {researchTrace.providerErrors && researchTrace.providerErrors.length > 0 && (

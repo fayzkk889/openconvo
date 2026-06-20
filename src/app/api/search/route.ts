@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { searchWeb, searchWebMany } from '@/lib/search';
 import { enrichSearchResults } from '@/lib/web-extract';
 import { planResearchQueries } from '@/lib/research-planner';
+import { generateResearchPlan } from '@/lib/openrouter';
 
 type SearchUsageMode = 'byok' | 'hosted-search';
 
@@ -19,7 +20,8 @@ const hostedSearchUsage = new Map<string, { count: number; resetAt: number }>();
 export async function POST(request: NextRequest) {
   try {
     const key = getClientTavilyKey(request);
-    const { query, mode } = await request.json();
+    const openrouterKey = getClientOpenRouterKey(request);
+    const { query, mode, model } = await request.json();
     if (!query || typeof query !== 'string') {
       return Response.json({ error: 'Query is required' }, { status: 400 });
     }
@@ -47,10 +49,14 @@ export async function POST(request: NextRequest) {
 
     const searchMode = mode === 'deep-research' ? 'deep-research' : mode === 'research' ? 'research' : 'search';
     const researchPlan = searchMode !== 'search'
-      ? planResearchQueries(trimmedQuery, { deep: searchMode === 'deep-research' })
+      ? await buildResearchPlan(trimmedQuery, {
+        deep: searchMode === 'deep-research',
+        apiKey: openrouterKey,
+        model: typeof model === 'string' ? model : undefined,
+      })
       : null;
     const results = researchPlan
-      ? await searchWebMany(researchPlan.queries, key, searchMode)
+      ? await searchWebMany(researchPlan.queries, key, searchMode, researchPlan.entities || [])
       : await searchWeb(trimmedQuery, key, searchMode);
     const enrichedResults = await enrichSearchResults(results.results, {
       maxPages: searchMode === 'deep-research' ? 8 : searchMode === 'research' ? 5 : 2,
@@ -61,6 +67,8 @@ export async function POST(request: NextRequest) {
       {
         ...results,
         results: enrichedResults,
+        plannedEntities: researchPlan?.entities,
+        planner: researchPlan?.planner,
         hostedSearchUsage: publicHostedSearchUsage(committedQuota),
       },
       {
@@ -82,6 +90,34 @@ export async function POST(request: NextRequest) {
 function getClientTavilyKey(request: NextRequest): string | null {
   const key = request.headers.get('x-tavily-key')?.trim();
   return key || null;
+}
+
+function getClientOpenRouterKey(request: NextRequest): string | null {
+  const key = request.headers.get('x-openrouter-key')?.trim();
+  return key || null;
+}
+
+async function buildResearchPlan(
+  query: string,
+  options: { deep: boolean; apiKey?: string | null; model?: string }
+): Promise<{ queries: string[]; entities?: string[]; planner: 'model' | 'heuristic' }> {
+  const modelPlan = await generateResearchPlan(query, {
+    apiKey: options.apiKey,
+    preferredModel: options.model,
+    deep: options.deep,
+  });
+  if (modelPlan?.queries.length) {
+    return {
+      queries: modelPlan.queries,
+      entities: modelPlan.entities,
+      planner: 'model',
+    };
+  }
+
+  return {
+    ...planResearchQueries(query, { deep: options.deep }),
+    planner: 'heuristic',
+  };
 }
 
 function getHostedSearchQuotaStatus(request: NextRequest, clientKey: string | null): HostedSearchQuota {

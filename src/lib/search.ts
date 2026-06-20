@@ -82,14 +82,15 @@ export async function searchWeb(
 export async function searchWebMany(
   queries: string[],
   clientKey?: string | null,
-  mode: SearchMode = 'research'
+  mode: SearchMode = 'research',
+  entities: string[] = []
 ): Promise<SearchResponse> {
   const plannedQueries = queries.filter((query) => query.trim().length > 0);
   const responses = await Promise.all(
     plannedQueries.map((query) => searchWeb(query, clientKey, mode))
   );
   const rankedResults = rankSearchResults(dedupeResults(responses.flatMap((response) => response.results)), plannedQueries[0] || '');
-  const results = diversifyResearchResults(rankedResults, plannedQueries[0] || '')
+  const results = diversifyResearchResults(rankedResults, plannedQueries[0] || '', entities)
     .slice(0, maxCombinedResultsForMode(mode));
   const providers = Array.from(new Set(responses.flatMap((response) =>
     response.provider ? [response.provider] : []
@@ -323,8 +324,8 @@ function maxCombinedResultsForMode(mode: SearchMode): number {
   return mode === 'research' ? 12 : 6;
 }
 
-function diversifyResearchResults(results: SearchResult[], query: string): SearchResult[] {
-  const comparisonResults = diversifyComparisonResults(results, query);
+function diversifyResearchResults(results: SearchResult[], query: string, entities: string[] = []): SearchResult[] {
+  const comparisonResults = diversifyComparisonResults(results, query, entities);
   const selected = new Map<string, SearchResult>();
   const hostCounts = new Map<string, number>();
 
@@ -343,42 +344,13 @@ function diversifyResearchResults(results: SearchResult[], query: string): Searc
   return Array.from(selected.values());
 }
 
-function diversifyComparisonResults(results: SearchResult[], query: string): SearchResult[] {
-  const entities = comparisonEntities(query);
-  if (entities.length >= 2) {
+function diversifyComparisonResults(results: SearchResult[], query: string, plannedEntities: string[] = []): SearchResult[] {
+  const entities = plannedEntities.length ? plannedEntities : comparisonEntities(query);
+  if (entities.length > 0) {
     return diversifyByEntities(results, entities);
   }
 
-  const lower = query.toLowerCase();
-  const needsOpenAI = /\b(openai|gpt|codex|chatgpt)\b/.test(lower);
-  const needsAnthropic = /\b(anthropic|claude|opus|sonnet|haiku|claude code)\b/.test(lower);
-  if (!needsOpenAI || !needsAnthropic) return results;
-
-  const openaiResults = results.filter((result) => sourceFamily(result.url) === 'openai').slice(0, 4);
-  const anthropicResults = results.filter((result) => sourceFamily(result.url) === 'anthropic').slice(0, 4);
-  const selected = new Map<string, SearchResult>();
-  const queryWantsCodex = /\bcodex\b/.test(lower);
-  const queryWantsGpt = /\bgpt\s*-?\s*5|gpt5\b/.test(lower);
-  const queryWantsClaudeCode = /\bclaude code\b/.test(lower);
-  const queryWantsOpus = /\bopus\b/.test(lower);
-  const opusVersion = lower.match(/\bopus\s*4(?:\.|-)?8\b/)?.[0];
-
-  addRepresentativeResult(selected, results, queryWantsCodex, 'openai', /\bcodex\b/i);
-  addRepresentativeResult(selected, results, queryWantsGpt, 'openai', /\bgpt\s*-?\s*5|gpt5\b/i);
-  addRepresentativeResult(selected, results, queryWantsClaudeCode, 'anthropic', /\bclaude code\b/i);
-  addRepresentativeResult(selected, results, Boolean(opusVersion), 'anthropic', /\bopus\s*4(?:\.|-)?8\b/i);
-  addRepresentativeResult(selected, results, queryWantsOpus, 'anthropic', /\bopus\b/i);
-
-  for (let index = 0; index < Math.max(openaiResults.length, anthropicResults.length); index += 1) {
-    if (openaiResults[index]) selected.set(canonicalUrlKey(openaiResults[index].url), openaiResults[index]);
-    if (anthropicResults[index]) selected.set(canonicalUrlKey(anthropicResults[index].url), anthropicResults[index]);
-  }
-
-  for (const result of results) {
-    selected.set(canonicalUrlKey(result.url), result);
-  }
-
-  return Array.from(selected.values());
+  return results;
 }
 
 function diversifyByEntities(results: SearchResult[], entities: string[]): SearchResult[] {
@@ -416,14 +388,13 @@ function comparisonEntities(query: string): string[] {
     return [];
   }
 
-  const known = query.match(/\b(?:OpenAI|ChatGPT|GPT\s*-?\s*\d(?:\.\d)?|Codex|Claude(?:\s+Code)?|Opus\s+\d(?:\.\d)?|Sonnet\s+\d(?:\.\d)?|Haiku\s+\d(?:\.\d)?|Anthropic|Gemini(?:\s+\d(?:\.\d)?)?|Llama(?:\s+\d(?:\.\d)?)?|Mistral|Cohere|Perplexity|Manus|Cursor|Windsurf|Copilot|Vercel|Supabase|Firebase|Tavily|SearxNG|DuckDuckGo)\b/gi) || [];
   const splitEntities = query
-    .split(/\b(?:vs\.?|versus|or|and|\+)\b|,/i)
+    .split(/\b(?:vs\.?|versus|or|compared with|compared to)\b|,/i)
     .map((part) => part.replace(/\b(which|one|is|better|best|should|i|use|choose|tell|me|can|you|with|for|pocket|friendly|cheap|cheaper)\b/gi, ' '))
     .map((part) => part.replace(/\s+/g, ' ').trim())
     .filter((part) => part.length >= 3 && part.length <= 80);
 
-  return Array.from(new Set([...known, ...splitEntities].map((entity) => entity.trim()).filter(Boolean))).slice(0, 8);
+  return Array.from(new Set(splitEntities.map((entity) => entity.trim()).filter(Boolean))).slice(0, 8);
 }
 
 function entityPattern(entity: string): RegExp {
@@ -437,37 +408,6 @@ function hostKey(url: string): string {
   } catch {
     return 'unknown';
   }
-}
-
-function addRepresentativeResult(
-  selected: Map<string, SearchResult>,
-  results: SearchResult[],
-  shouldAdd: boolean,
-  family: 'openai' | 'anthropic',
-  pattern: RegExp
-): void {
-  if (!shouldAdd) return;
-  const result = results.find((item) =>
-    sourceFamily(item.url) === family &&
-    pattern.test(`${item.title} ${item.snippet} ${item.url}`)
-  );
-  if (result) {
-    selected.set(canonicalUrlKey(result.url), result);
-  }
-}
-
-function sourceFamily(url: string): 'openai' | 'anthropic' | 'other' {
-  try {
-    const host = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
-    if (host === 'openai.com' || host.endsWith('.openai.com')) return 'openai';
-    if (host === 'github.com' && url.toLowerCase().includes('/openai/')) return 'openai';
-    if (host === 'anthropic.com' || host.endsWith('.anthropic.com') || host === 'claude.com' || host.endsWith('.claude.com')) {
-      return 'anthropic';
-    }
-  } catch {
-    return 'other';
-  }
-  return 'other';
 }
 
 async function withTimeout<T>(

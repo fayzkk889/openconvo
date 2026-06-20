@@ -77,6 +77,7 @@ check('web search enriches results with page extraction', /enrichSearchResults/.
 check('web extraction blocks local network fetches', /isBlockedHostname/.test(webExtract) && /169/.test(webExtract) && /192/.test(webExtract));
 check('web extraction caches fetched pages', /pageCache/.test(webExtract) && /PAGE_CACHE_TTL_MS/.test(webExtract));
 check('research mode plans multiple queries', /planResearchQueries/.test(searchRoute) && /searchWebMany/.test(searchLib) && /MAX_PLANNED_QUERIES\s*=\s*8/.test(researchPlanner));
+check('research mode uses model planner before heuristic fallback', /generateResearchPlan/.test(searchRoute) && /planner:\s*'model'/.test(searchRoute) && /planner:\s*'heuristic'/.test(searchRoute));
 check('auto mode has broad web research triggers', /needsWebResearch/.test(read('src/lib/tasks.ts')) && /latest\|current/.test(read('src/lib/tasks.ts')) && /looksLikeExternalDecision/.test(read('src/lib/tasks.ts')));
 check('research planner uses generic query analysis', /analyzeResearchQuery/.test(researchPlanner) && /inferResearchIntent/.test(researchPlanner) && /extractCandidateSubjects/.test(researchPlanner));
 check('research planner avoids topic-specific subject hardcoding', !/OpenAI|ChatGPT|Claude|Anthropic|Continental|GT 650|Supabase|Firebase/.test(researchPlanner));
@@ -91,6 +92,7 @@ check('research progress is visible before synthesis', /researchStatus/.test(use
 check('search results are quality ranked', /rankSearchResults/.test(searchLib) && /sourceScore/.test(sourceQuality));
 check('source quality favors primary evidence across topics', /needsPrimaryEvidence/.test(sourceQuality) && /not a primary source/.test(sourceQuality));
 check('comparison search keeps evidence diverse across entities and hosts', /diversifyResearchResults/.test(searchLib) && /diversifyByEntities/.test(searchLib) && /hostKey/.test(searchLib));
+check('comparison search has no topic-specific vendor branch', !/needsOpenAI|needsAnthropic|sourceFamily|addRepresentativeResult/.test(searchLib));
 check('source quality is exposed to prompts and UI', /Quality:/.test(prompts) && /sourceLabel/.test(messageComponent));
 check('chat route preserves source quality for prompting', /sourceScore/.test(chatRoute) && /sourceReason/.test(chatRoute));
 check('research prompts include current date and stale-memory guardrails', /Current Date/.test(prompts) && /stale memory/.test(prompts));
@@ -104,7 +106,7 @@ check('message actions stay clickable while hovering', !/opacity-0 group-hover:o
 check('markdown tables remain contained', /overflow-x: auto/.test(globals) && /vertical-align: top/.test(globals));
 check('chat stream stalls are bounded and recoverable', /CHAT_STREAM_IDLE_TIMEOUT_MS/.test(chatRoute) && /readStreamChunkWithTimeout/.test(chatRoute) && /did not stream a response in time/.test(chatRoute));
 check('client search and title requests have timeouts', /SEARCH_REQUEST_TIMEOUT_MS/.test(useChat) && /TITLE_REQUEST_TIMEOUT_MS/.test(useChat) && /fetchWithTimeout/.test(useChat));
-check('local conversation titles are summarized, not raw first prompts', /buildConversationTitle/.test(titleLib) && /buildComparisonTitle/.test(titleLib) && /buildPurchaseTitle/.test(titleLib) && /buildFeatureTitle/.test(titleLib) && /buildConversationTitle/.test(useChat) && !/function buildLocalTitle/.test(useChat));
+check('local conversation titles are summarized, not raw first prompts', /buildConversationTitle/.test(titleLib) && /buildComparisonTitle/.test(titleLib) && /buildPurchaseTitle/.test(titleLib) && /buildFeatureTitle/.test(titleLib) && /buildConversationTitle/.test(useChat) && /buildConversationTitle/.test(openrouter) && !/function buildLocalTitle/.test(useChat));
 check('research reports are extracted as artifacts', /extractResearchReportArtifact/.test(artifactsLib) && /Research Evidence/.test(artifactsLib));
 check('artifacts can be exported directly', /handleDownload/.test(read('src/components/artifact-panel.tsx')) && /artifactExtension/.test(read('src/components/artifact-panel.tsx')));
 check('database migration repairs artifact indexes', /artifactStore\.indexNames\.contains\('by-project'\)/.test(db));

@@ -21,6 +21,8 @@ export interface SearchResultRef {
 export interface ResearchTrace {
   query: string;
   plannedQueries?: string[];
+  plannedEntities?: string[];
+  planner?: 'model' | 'heuristic';
   provider?: string;
   providers?: string[];
   providerErrors?: string[];

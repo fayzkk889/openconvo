@@ -13,6 +13,8 @@ export interface SearchResult {
 export interface SearchResponse {
   query: string;
   plannedQueries?: string[];
+  plannedEntities?: string[];
+  planner?: 'model' | 'heuristic';
   mode?: 'search' | 'research' | 'deep-research';
   results: SearchResult[];
   answer?: string;

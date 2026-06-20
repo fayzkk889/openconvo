@@ -128,8 +128,9 @@ export function useChat(
             headers: {
               'Content-Type': 'application/json',
               ...(tavilyApiKey ? { 'x-tavily-key': tavilyApiKey } : {}),
+              ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
             },
-            body: JSON.stringify({ query: content.trim(), mode: searchMode }),
+            body: JSON.stringify({ query: content.trim(), mode: searchMode, model: activeModel }),
           }, SEARCH_REQUEST_TIMEOUT_MS);
           if (searchRes.ok) {
             searchResults = await searchRes.json();
@@ -720,6 +721,8 @@ function buildResearchTrace(searchResults: SearchResponse | null): ResearchTrace
   return {
     query: searchResults.query,
     plannedQueries: searchResults.plannedQueries,
+    plannedEntities: searchResults.plannedEntities,
+    planner: searchResults.planner,
     provider: searchResults.provider,
     providers: searchResults.providers,
     providerErrors: searchResults.providerErrors,

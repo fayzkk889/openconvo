@@ -4,19 +4,21 @@ export type ResearchPlan = {
 };
 
 const MAX_PLANNED_QUERIES = 4;
+const MAX_DEEP_PLANNED_QUERIES = 7;
 
-export function planResearchQueries(query: string): ResearchPlan {
+export function planResearchQueries(query: string, options?: { deep?: boolean }): ResearchPlan {
   const originalQuery = normalizeQuery(query);
   const candidates = [
     originalQuery,
     ...intentQueries(originalQuery),
     `${originalQuery} sources`,
     `${originalQuery} analysis`,
+    ...(options?.deep ? deepResearchQueries(originalQuery) : []),
   ];
 
   return {
     originalQuery,
-    queries: dedupeQueries(candidates).slice(0, MAX_PLANNED_QUERIES),
+    queries: dedupeQueries(candidates).slice(0, options?.deep ? MAX_DEEP_PLANNED_QUERIES : MAX_PLANNED_QUERIES),
   };
 }
 
@@ -48,6 +50,16 @@ function intentQueries(query: string): string[] {
   return queries.length > 0
     ? queries
     : [`${query} overview`, `${query} key facts`];
+}
+
+function deepResearchQueries(query: string): string[] {
+  return [
+    `${query} official documentation`,
+    `${query} case studies`,
+    `${query} expert analysis`,
+    `${query} limitations risks`,
+    `${query} alternatives comparison`,
+  ];
 }
 
 function normalizeQuery(query: string): string {

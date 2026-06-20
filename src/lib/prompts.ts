@@ -33,6 +33,10 @@ export function buildSystemPrompt({
     prompt += '\n\n## Research Mode\nThe user requested a research-style answer. Be more thorough than a normal chat response: synthesize evidence, call out uncertainty, organize findings clearly, and cite sources for factual claims when sources are available.';
   }
 
+  if (taskType === 'deep-research') {
+    prompt += '\n\n## Deep Research Depth\nThe search context may include multiple planned queries and opened pages. Treat repeated claims across high-quality sources as stronger evidence, highlight disagreement or missing evidence, and avoid overclaiming from weak snippets.';
+  }
+
   if (agentMode) {
     prompt += '\n\n## Agent Mode\nThe user requested an agent-style response. Work like a careful task runner: identify the goal, break it into concrete steps, use available context and tools represented in this chat, report progress and assumptions, and finish with a clear result. Do not claim to have taken external actions that are not available in this app. Ask for clarification only if you are blocked or the next action would be risky.';
   }

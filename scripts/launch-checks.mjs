@@ -69,6 +69,7 @@ check('web search supports optional SearxNG', /searxngProvider/.test(searchLib) 
 check('web search enriches results with page extraction', /enrichSearchResults/.test(searchRoute) && /fetchReadablePage/.test(webExtract));
 check('web extraction blocks local network fetches', /isBlockedHostname/.test(webExtract) && /169/.test(webExtract) && /192/.test(webExtract));
 check('research mode plans multiple queries', /planResearchQueries/.test(searchRoute) && /searchWebMany/.test(searchLib) && /MAX_PLANNED_QUERIES/.test(researchPlanner));
+check('deep research mode expands query and source depth', /deep-research/.test(searchRoute) && /MAX_DEEP_PLANNED_QUERIES/.test(researchPlanner) && /maxCombinedResultsForMode/.test(searchLib));
 check('research trace is saved on messages', /researchTrace/.test(useChat) && /buildResearchTrace/.test(useChat));
 check('research trace renders in source panel', /Research trace/.test(messageComponent) && /plannedQueries/.test(messageComponent));
 check('search results are quality ranked', /rankSearchResults/.test(searchLib) && /sourceScore/.test(sourceQuality));

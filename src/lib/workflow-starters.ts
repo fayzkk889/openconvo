@@ -28,6 +28,15 @@ export const WORKFLOW_STARTERS: WorkflowStarter[] = [
     researchEnabled: true,
   },
   {
+    id: 'deep-research',
+    title: 'Deep research',
+    description: 'Plan multiple searches, inspect more sources, and produce a fuller brief.',
+    prompt: 'Do deep research on this topic. Plan multiple searches, compare source evidence, call out uncertainty, cite sources, and finish with practical takeaways:\n\n',
+    taskType: 'deep-research',
+    searchEnabled: true,
+    researchEnabled: true,
+  },
+  {
     id: 'file-analysis',
     title: 'Analyze a file',
     description: 'Upload a document and get a structured summary, risks, and next actions.',

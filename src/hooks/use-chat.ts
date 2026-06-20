@@ -103,8 +103,10 @@ export function useChat(
 
       // Perform web search if enabled
       let searchResults: SearchResponse | null = null;
-      const shouldUseSearch = searchEnabled || researchEnabled || taskType === 'research';
-      const shouldUseResearch = researchEnabled || taskType === 'research';
+      const isResearchTask = taskType === 'research' || taskType === 'deep-research';
+      const shouldUseSearch = searchEnabled || researchEnabled || isResearchTask;
+      const shouldUseResearch = researchEnabled || isResearchTask;
+      const searchMode = taskType === 'deep-research' ? 'deep-research' : shouldUseResearch ? 'research' : 'search';
       if (shouldUseSearch) {
         try {
           const searchRes = await fetch('/api/search', {
@@ -113,7 +115,7 @@ export function useChat(
               'Content-Type': 'application/json',
               ...(tavilyApiKey ? { 'x-tavily-key': tavilyApiKey } : {}),
             },
-            body: JSON.stringify({ query: content.trim(), mode: shouldUseResearch ? 'research' : 'search' }),
+            body: JSON.stringify({ query: content.trim(), mode: searchMode }),
           });
           if (searchRes.ok) {
             searchResults = await searchRes.json();

@@ -18,7 +18,7 @@ The public site has two surfaces:
 - Free-model-first OpenRouter integration with dynamic model discovery, `:free` filtering, and request-level zero-price enforcement.
 - Streaming chat with fallback across curated free models when a provider is temporarily rate limited.
 - Hosted free mode with server-side shared OpenRouter capacity and a daily per-visitor limit.
-- Automatic web research with query planning, provider fallback, page extraction, and citations: Tavily, optional SearxNG, then lightweight keyless DuckDuckGo.
+- Automatic web research with query planning, provider fallback, page extraction, citations, source quality ranking, and a deeper research mode: Tavily, optional SearxNG, then lightweight keyless DuckDuckGo.
 - File uploads for text, markdown, code, JSON, CSV, and PDF context.
 - Projects with custom instructions and optional project default models.
 - Conversation title generation based on the first exchange.

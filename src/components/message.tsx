@@ -95,7 +95,7 @@ export function Message({
             {isAssistant && message.researchMode && (
               <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-warning)]">
                 <Microscope className="h-3 w-3" />
-                Research
+                {message.taskType === 'deep-research' ? 'Deep research' : 'Research'}
               </span>
             )}
             {isAssistant && taskPreset && !message.researchMode && (

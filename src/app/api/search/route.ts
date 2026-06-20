@@ -45,15 +45,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const searchMode = mode === 'research' ? 'research' : 'search';
-    const researchPlan = searchMode === 'research'
-      ? planResearchQueries(trimmedQuery)
+    const searchMode = mode === 'deep-research' ? 'deep-research' : mode === 'research' ? 'research' : 'search';
+    const researchPlan = searchMode !== 'search'
+      ? planResearchQueries(trimmedQuery, { deep: searchMode === 'deep-research' })
       : null;
     const results = researchPlan
       ? await searchWebMany(researchPlan.queries, key, searchMode)
       : await searchWeb(trimmedQuery, key, searchMode);
     const enrichedResults = await enrichSearchResults(results.results, {
-      maxPages: searchMode === 'research' ? 5 : 2,
+      maxPages: searchMode === 'deep-research' ? 8 : searchMode === 'research' ? 5 : 2,
     });
     const committedQuota = commitHostedSearchQuota(hostedQuota);
 

@@ -5,7 +5,7 @@ const TAVILY_BASE = 'https://api.tavily.com';
 const DUCKDUCKGO_HTML = 'https://html.duckduckgo.com/html/';
 const DEFAULT_USER_AGENT = 'OpenConvo/0.1 (+https://openconvo.vercel.app)';
 
-type SearchMode = 'search' | 'research';
+export type SearchMode = 'search' | 'research' | 'deep-research';
 
 type SearchProviderContext = {
   query: string;
@@ -46,6 +46,7 @@ export async function searchWeb(
           query,
           answer: result.answer,
           provider: result.provider,
+          mode,
           results: rankSearchResults(dedupeResults(result.results), query).slice(0, maxResultsForMode(mode)),
         };
       }
@@ -57,6 +58,7 @@ export async function searchWeb(
   return {
     query,
     provider: 'none',
+    mode,
     results: [],
     providerErrors,
   };
@@ -72,7 +74,7 @@ export async function searchWebMany(
     plannedQueries.map((query) => searchWeb(query, clientKey, mode))
   );
   const results = rankSearchResults(dedupeResults(responses.flatMap((response) => response.results)), plannedQueries[0] || '')
-    .slice(0, mode === 'research' ? 12 : 6);
+    .slice(0, maxCombinedResultsForMode(mode));
   const providers = Array.from(new Set(responses.flatMap((response) =>
     response.provider ? [response.provider] : []
   )));
@@ -81,6 +83,7 @@ export async function searchWebMany(
   return {
     query: plannedQueries[0] || '',
     plannedQueries,
+    mode,
     results,
     providers,
     provider: providers[0] || 'none',
@@ -112,7 +115,7 @@ const tavilyProvider: SearchProvider = {
       body: JSON.stringify({
         api_key: apiKey,
         query: context.query,
-        search_depth: context.mode === 'research' ? 'advanced' : 'basic',
+        search_depth: context.mode === 'search' ? 'basic' : 'advanced',
         include_answer: true,
         max_results: maxResultsForMode(context.mode),
       }),
@@ -292,7 +295,13 @@ function canonicalUrlKey(url: string): string {
 }
 
 function maxResultsForMode(mode: SearchMode): number {
+  if (mode === 'deep-research') return 10;
   return mode === 'research' ? 8 : 5;
+}
+
+function maxCombinedResultsForMode(mode: SearchMode): number {
+  if (mode === 'deep-research') return 18;
+  return mode === 'research' ? 12 : 6;
 }
 
 function cleanText(value: string): string {

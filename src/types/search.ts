@@ -13,6 +13,7 @@ export interface SearchResult {
 export interface SearchResponse {
   query: string;
   plannedQueries?: string[];
+  mode?: 'search' | 'research' | 'deep-research';
   results: SearchResult[];
   answer?: string;
   provider?: string;

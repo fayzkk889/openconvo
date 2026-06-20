@@ -102,7 +102,7 @@ check('research failures fall back to source-backed answers', /buildResearchFall
 check('research answers enforce visible source citations', /ensureResearchCitations/.test(researchCitations) && /buildSourcesSection/.test(researchCitations) && /hasRealSourceLinks/.test(researchCitations) && /citations/.test(chatRoute));
 check('research source pills are visible above source panel', /SourcePills/.test(messageComponent) && /\[\{index \+ 1\}\]/.test(messageComponent));
 check('research loading state explains source drafting', /Drafting from sources/.test(messageComponent) && /Sources will be attached/.test(messageComponent));
-check('message actions stay clickable while hovering', !/opacity-0 group-hover:opacity-100/.test(messageActions) && /focus-within:opacity-100/.test(messageComponent));
+check('message actions stay clickable while hovering', !/opacity-0 group-hover:opacity-100/.test(messageActions) && !/md:opacity-0/.test(messageComponent) && /relative z-10 mt-2 opacity-100/.test(messageComponent));
 check('markdown tables remain contained', /overflow-x: auto/.test(globals) && /vertical-align: top/.test(globals));
 check('chat stream stalls are bounded and recoverable', /CHAT_STREAM_IDLE_TIMEOUT_MS/.test(chatRoute) && /readStreamChunkWithTimeout/.test(chatRoute) && /did not stream a response in time/.test(chatRoute));
 check('client search and title requests have timeouts', /SEARCH_REQUEST_TIMEOUT_MS/.test(useChat) && /TITLE_REQUEST_TIMEOUT_MS/.test(useChat) && /fetchWithTimeout/.test(useChat));
@@ -123,6 +123,7 @@ check('Open Graph image route exists', /ImageResponse/.test(ogImage) && /1200/.t
 check('mobile sidebar has wide overlay', /92vw/.test(sidebar));
 check('empty state has mobile and short viewport rules', /empty-features/.test(globals) && /max-height: 760px/.test(globals) && /max-width: 640px/.test(globals));
 check('chat streaming uses display smoothing', /createStreamingDisplay/.test(useChat) && /takeStreamingChunk/.test(useChat));
+check('empty chat streams retry automatically', /EMPTY_RESPONSE_RETRY_ATTEMPTS/.test(useChat) && /after automatic retries/.test(useChat));
 check('active conversation survives refresh', /openconvo\.activeConversationId/.test(useConversations) && /getStoredConversationId/.test(useConversations) && /if \(loading\) return/.test(useConversations));
 check('deployment config gates first render', /loaded:\s*false/.test(useDeploymentConfig) && /deploymentConfig\.loaded/.test(appShell));
 check('workflow starters are rendered on empty state', /WORKFLOW_STARTERS/.test(emptyState) && /onStartWorkflow/.test(emptyState));

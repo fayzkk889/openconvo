@@ -15,6 +15,7 @@ const STREAM_FLUSH_MS = 18;
 const STREAM_FINISH_BUDGET_MS = 900;
 const SEARCH_REQUEST_TIMEOUT_MS = 70 * 1000;
 const TITLE_REQUEST_TIMEOUT_MS = 20 * 1000;
+const EMPTY_RESPONSE_RETRY_ATTEMPTS = 2;
 
 type StreamingDisplay = {
   append: (content: string) => void;
@@ -206,37 +207,6 @@ export function useChat(
             let finalModel = runModel;
             streamDisplay = createStreamingDisplay(assistantId, () => finalModel, setMessages);
 
-            const response = await fetch('/api/chat', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
-              },
-              body: JSON.stringify({
-                messages: apiMessages,
-                model: runModel,
-                availableModels: models
-                  .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
-                  .map((item) => item.id),
-                systemPrompt: systemPrompt || undefined,
-                searchResults: searchResults?.results,
-                attachments,
-                researchMode: shouldUseResearch,
-                agentMode: agentEnabled === true,
-                taskType,
-              }),
-              signal: abortRef.current.signal,
-            });
-
-            if (!response.ok || !response.body) {
-              throw await readChatError(response, 'Failed to send message');
-            }
-
-            const reader = response.body?.getReader();
-            if (!reader) throw new Error('No response stream');
-
-            const decoder = new TextDecoder();
-            let buffer = '';
             const recordedFallbackFailures = new Set<string>();
             const processLine = (line: string) => {
               const trimmed = line.trim();
@@ -271,25 +241,65 @@ export function useChat(
               }
             };
 
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
+            for (let attempt = 0; attempt <= EMPTY_RESPONSE_RETRY_ATTEMPTS; attempt += 1) {
+              fullContent = '';
+              const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
+                },
+                body: JSON.stringify({
+                  messages: apiMessages,
+                  model: runModel,
+                  availableModels: models
+                    .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
+                    .map((item) => item.id),
+                  systemPrompt: systemPrompt || undefined,
+                  searchResults: searchResults?.results,
+                  attachments,
+                  researchMode: shouldUseResearch,
+                  agentMode: agentEnabled === true,
+                  taskType,
+                }),
+                signal: abortRef.current.signal,
+              });
 
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split('\n');
-              buffer = lines.pop() || '';
-
-              for (const line of lines) {
-                processLine(line);
+              if (!response.ok || !response.body) {
+                throw await readChatError(response, 'Failed to send message');
               }
-            }
-            buffer += decoder.decode();
-            if (buffer.trim()) {
-              processLine(buffer);
+
+              const reader = response.body?.getReader();
+              if (!reader) throw new Error('No response stream');
+
+              const decoder = new TextDecoder();
+              let buffer = '';
+              try {
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+
+                  buffer += decoder.decode(value, { stream: true });
+                  const lines = buffer.split('\n');
+                  buffer = lines.pop() || '';
+
+                  for (const line of lines) {
+                    processLine(line);
+                  }
+                }
+                buffer += decoder.decode();
+                if (buffer.trim()) {
+                  processLine(buffer);
+                }
+              } finally {
+                reader.releaseLock();
+              }
+
+              if (fullContent.trim()) break;
             }
 
             if (!fullContent.trim()) {
-              throw new Error('The model returned an empty response. Please try again.');
+              throw new Error('The model returned an empty response after automatic retries. Please try again.');
             }
 
             const finalContentWithCitations = shouldUseResearch
@@ -498,35 +508,6 @@ export function useChat(
             : m.content,
         }));
 
-        const response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
-          },
-          body: JSON.stringify({
-            messages: apiMessages,
-            model,
-            availableModels: models
-              .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
-              .map((item) => item.id),
-            systemPrompt: systemPrompt || undefined,
-            searchResults: targetMessage.searchResults,
-            attachments: userMsg.attachments,
-            researchMode: targetMessage.researchMode === true,
-            agentMode: targetMessage.agentMode === true,
-            taskType: targetMessage.taskType,
-          }),
-          signal: abortRef.current.signal,
-        });
-
-        if (!response.ok || !response.body) {
-          throw await readChatError(response, 'Failed to regenerate message');
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
         const recordedFallbackFailures = new Set<string>();
         const processLine = (line: string) => {
           const trimmed = line.trim();
@@ -561,25 +542,63 @@ export function useChat(
           }
         };
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        for (let attempt = 0; attempt <= EMPTY_RESPONSE_RETRY_ATTEMPTS; attempt += 1) {
+          fullContent = '';
+          const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
+            },
+            body: JSON.stringify({
+              messages: apiMessages,
+              model,
+              availableModels: models
+                .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
+                .map((item) => item.id),
+              systemPrompt: systemPrompt || undefined,
+              searchResults: targetMessage.searchResults,
+              attachments: userMsg.attachments,
+              researchMode: targetMessage.researchMode === true,
+              agentMode: targetMessage.agentMode === true,
+              taskType: targetMessage.taskType,
+            }),
+            signal: abortRef.current.signal,
+          });
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            processLine(line);
+          if (!response.ok || !response.body) {
+            throw await readChatError(response, 'Failed to regenerate message');
           }
-        }
-        buffer += decoder.decode();
-        if (buffer.trim()) {
-          processLine(buffer);
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                processLine(line);
+              }
+            }
+            buffer += decoder.decode();
+            if (buffer.trim()) {
+              processLine(buffer);
+            }
+          } finally {
+            reader.releaseLock();
+          }
+
+          if (fullContent.trim()) break;
         }
 
         if (!fullContent.trim()) {
-          throw new Error('The model returned an empty response. Please try again.');
+          throw new Error('The model returned an empty response after automatic retries. Please try again.');
         }
 
         const finalContentWithCitations = targetMessage.researchMode

@@ -335,7 +335,7 @@ export function Message({
           {/* Actions */}
           {!isStreaming && message.content && (
             <div className={cn(
-              'mt-2 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 hover:opacity-100',
+              'relative z-10 mt-2 opacity-100',
               isUser && 'self-end'
             )}>
               <MessageActions

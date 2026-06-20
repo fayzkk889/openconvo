@@ -132,19 +132,27 @@ function needsWebResearch(text: string): boolean {
     return true;
   }
 
-  if (/\b(latest|current|currently|today|yesterday|tomorrow|this week|this month|this year|recent|newest|news|breaking|now|live|as of)\b/.test(lower)) {
+  if (/\b(latest|current|currently|today|yesterday|tomorrow|this week|this month|this year|recent|newest|news|breaking|now|live|as of|trending|trends|viral|hot topics?|hashtags?)\b/.test(lower)) {
     return true;
   }
 
-  if (/\b(weather|score|fixture|schedule|standings|stock|share price|crypto|exchange rate|inflation|interest rate|election|law|legal|regulation|policy|visa|deadline)\b/.test(lower)) {
+  if (/\b(weather|score|fixture|schedule|standings|stock|share price|crypto|exchange rate|inflation|interest rate|election|law|legal|regulation|policy|visa|deadline|twitter|x\.com|reddit|instagram|youtube|tiktok|social media)\b/.test(lower)) {
     return true;
   }
 
-  if (/\b(price|cost|pricing|cheap|cheaper|pocket friendly|subscription|plan|free tier|available|availability|released|release date|launch|launched)\b/.test(lower)) {
+  if (/\b(price|cost|pricing|cheap|cheaper|pocket friendly|subscription|plan|free tier|available|availability|released|release date|launch|launched|budget|under|below|within|less than|up to|on road|ex showroom|ex-showroom)\b/.test(lower)) {
     return true;
   }
 
-  if (/\b(compare|comparison|versus|vs\.?|alternative|alternatives|better|best|which one|which is|choose|recommend|recommendation|worth it|should i use|should i buy)\b/.test(lower) && looksLikeExternalDecision(text)) {
+  if (/\b(?:rs|inr|rupees?|₹|lakh|lakhs|crore|crores|usd|dollars?|\$|gbp|eur)\b/.test(lower)) {
+    return true;
+  }
+
+  if (/\b(?:cc|bhp|nm|kmpl|mah|hz|gb|tb|mp|inch|inches)\b/.test(lower) && /\b(list|models?|bikes?|cars?|phones?|laptops?|under|above|more than|less than|best|buy|recommend|available)\b/.test(lower)) {
+    return true;
+  }
+
+  if (/\b(compare|comparison|versus|vs\.?|alternative|alternatives|better|best|which one|which is|which are|choose|recommend|recommendation|worth it|should i use|should i buy|give me the list|list of)\b/.test(lower) && looksLikeExternalDecision(text)) {
     return true;
   }
 

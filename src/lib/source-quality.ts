@@ -63,6 +63,17 @@ const LOW_SIGNAL_HOST_HINTS = [
   'rumor.',
 ];
 
+const TREND_SNAPSHOT_HOST_HINTS = [
+  'trends24.',
+  'xtrends.',
+  'whatstrends.',
+  'globaltwittertrends.',
+  'twitter-trends.',
+  'snaplytics.',
+  'social-searcher.',
+  'trendsmap.',
+];
+
 export function rankSearchResults(results: SearchResult[], query: string): SearchResult[] {
   return results
     .map((result) => applySourceQuality(result, query))
@@ -88,6 +99,7 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   const lowerQuery = query.toLowerCase();
   const needsPrimaryEvidence = /\b(price|cost|pricing|stock|market|funding|revenue|law|legal|regulation|policy|medical|health|safety|release|released|launch|available|availability|official|docs|documentation|api|model|models)\b/.test(lowerQuery);
   const needsLiveEventEvidence = /\b(schedule|schedules|fixture|fixtures|match|matches|today|tonight|live|score|scores|result|results|winner|winners|loser|losers|standings|table|bracket|tournament|cup|league|championship)\b/.test(lowerQuery);
+  const needsTrendEvidence = /\b(twitter|x\.com|reddit|instagram|youtube|tiktok|social media|trending|trends|viral|hot topics?|hashtags?)\b/.test(lowerQuery);
   const looksLikeComparisonContent = /\b(vs|versus|benchmark|benchmarks|compared|wins?|showdown)\b/.test(haystack);
 
   if (isPrimaryHost) {
@@ -128,6 +140,21 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   if (needsLiveEventEvidence && /\b(official|federation|association|governing|organizer|tournament)\b/.test(haystack)) {
     score += 8;
     reasons.push('event authority terms');
+  }
+
+  if (needsTrendEvidence && /\b(trending|trends|hashtags?|viral|hot topics?|today|now)\b/.test(haystack)) {
+    score += 14;
+    reasons.push('trend snapshot terms');
+  }
+
+  if (needsTrendEvidence && TREND_SNAPSHOT_HOST_HINTS.some((hint) => host.includes(hint))) {
+    score += 10;
+    reasons.push('trend snapshot host');
+  }
+
+  if (needsTrendEvidence && /\b(explore|home|login|signup|for-you)\b/.test(path) && /(^|\.)x\.com$|(^|\.)twitter\.com$|(^|\.)reddit\.com$|(^|\.)instagram\.com$|(^|\.)tiktok\.com$/.test(host)) {
+    score -= 18;
+    reasons.push('generic social landing page');
   }
 
   if (LOW_SIGNAL_HOST_HINTS.some((hint) => host.includes(hint))) {

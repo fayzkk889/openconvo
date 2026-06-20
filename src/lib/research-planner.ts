@@ -13,6 +13,7 @@ type ResearchIntent = {
   evidence: boolean;
   purchase: boolean;
   liveEvent: boolean;
+  socialTrend: boolean;
 };
 
 type ResearchAnalysis = {
@@ -41,6 +42,7 @@ const STOP_WORDS = new Set([
   'can',
   'changed',
   'changes',
+  'check',
   'cheapest',
   'choice',
   'choices',
@@ -84,6 +86,7 @@ const STOP_WORDS = new Set([
   'recent',
   'recommended',
   'right',
+  's',
   'should',
   'show',
   'tell',
@@ -104,6 +107,7 @@ const STOP_WORDS = new Set([
   'want',
   'worth',
   'what',
+  'whats',
   'when',
   'where',
   'which',
@@ -168,6 +172,9 @@ const INTENT_WORDS = new Set([
   'specs',
   'standings',
   'table',
+  'topics',
+  'trending',
+  'trends',
   'tournament',
   'update',
   'updates',
@@ -180,6 +187,7 @@ export function planResearchQueries(query: string, options?: { deep?: boolean })
   const analysis = analyzeResearchQuery(originalQuery);
   const candidates = [
     originalQuery,
+    ...priorityIntentQueries(analysis),
     ...subjectQueries(analysis),
     ...intentQueries(analysis),
     `${originalQuery} sources`,
@@ -212,7 +220,8 @@ function inferResearchIntent(query: string): ResearchIntent {
     technical: /\b(api|docs|documentation|framework|library|github|open source|opensource|developer|code|spec|specs|specification|specifications)\b/.test(lower),
     evidence: /\b(source|sources|cite|citation|research|verify|fact check|fact-check|evidence|proof)\b/.test(lower),
     purchase: /\b(buy|buying|purchase|purchasing|shop|shopping|recommend|recommendation|budget)\b/.test(lower),
-    liveEvent: /\b(schedule|schedules|fixture|fixtures|match|matches|today|tonight|live|score|scores|result|results|winner|winners|loser|losers|standings|table|bracket|tournament|cup|league|championship)\b/.test(lower),
+    liveEvent: /\b(schedule|schedules|fixture|fixtures|match|matches|score|scores|result|results|winner|winners|loser|losers|standings|table|bracket|tournament|cup|league|championship)\b/.test(lower),
+    socialTrend: /\b(twitter|x\.com|reddit|instagram|youtube|tiktok|social media|trending|trends|viral|hot topics?|hashtags?)\b/.test(lower),
   };
 }
 
@@ -257,9 +266,49 @@ function subjectQueries(analysis: ResearchAnalysis): string[] {
       queries.push(`${subject} today matches results official`);
       queries.push(`${subject} standings bracket official`);
     }
+
+    if (analysis.intent.socialTrend) {
+      queries.push(`${subject} trending topics today snapshot`);
+      queries.push(`${subject} hashtags today India`);
+      queries.push(`${subject} reddit trending India today`);
+    }
   }
 
   return queries;
+}
+
+function priorityIntentQueries(analysis: ResearchAnalysis): string[] {
+  return [
+    ...socialTrendQueries(analysis),
+    ...constraintQueries(analysis),
+  ];
+}
+
+function socialTrendQueries(analysis: ResearchAnalysis): string[] {
+  if (!analysis.intent.socialTrend) return [];
+
+  const scope = extractLocationScope(analysis.originalQuery);
+  const timeframe = /\b(today|now|currently|this week|this month)\b/i.exec(analysis.originalQuery)?.[0] || 'today';
+  const platforms = extractSocialPlatforms(analysis.originalQuery);
+  const targets = platforms.length > 0 ? platforms : ['social media'];
+  const scopeSuffix = [scope, timeframe].filter(Boolean).join(' ');
+
+  return dedupeQueries(targets.flatMap((platform) => [
+    `${platform} trend tracker ${scopeSuffix}`.trim(),
+    `${platform} trends ${scopeSuffix}`.trim(),
+    `${platform} trending topics ${scopeSuffix}`.trim(),
+    `${platform} hashtags ${scopeSuffix}`.trim(),
+  ]));
+}
+
+function constraintQueries(analysis: ResearchAnalysis): string[] {
+  const constraintQuery = buildConstraintSearchQuery(analysis.originalQuery);
+  if (!constraintQuery) return [];
+  return [
+    constraintQuery,
+    `${constraintQuery} best options`,
+    `${constraintQuery} latest price reviews`,
+  ];
 }
 
 function intentQueries(analysis: ResearchAnalysis): string[] {
@@ -295,6 +344,11 @@ function intentQueries(analysis: ResearchAnalysis): string[] {
     queries.push(`${query} live scores today fixtures`);
   }
 
+  if (analysis.intent.socialTrend) {
+    queries.push(`${query} trend tracker snapshot`);
+    queries.push(`${query} trending hashtags topics`);
+  }
+
   if (queries.length === 0) {
     queries.push(`${query} overview`);
     queries.push(`${query} key facts`);
@@ -318,6 +372,7 @@ function extractCandidateSubjects(query: string): string[] {
   const quoted = Array.from(query.matchAll(/"([^"]{2,100})"|'([^']{2,100})'/g)).map((match) => match[1] || match[2]);
   const strippedQuery = stripQuestionFrame(query);
   const namedSubjects = extractNamedSubjects(strippedQuery);
+  const listedThingSubjects = extractListedThingSubjects(query);
   const purchaseSubjects = extractPurchaseSubjects(query);
   const comparisonParts = extractComparisonSubjects(strippedQuery);
   const prepositionSubjects = Array.from(strippedQuery.matchAll(/\b(?:of|for|about|on|regarding|between)\s+([^?.,;:]{3,120})/gi))
@@ -328,6 +383,7 @@ function extractCandidateSubjects(query: string): string[] {
   return dedupeQueries([
     ...quoted,
     ...namedSubjects,
+    ...listedThingSubjects,
     ...purchaseSubjects,
     ...comparisonParts,
     ...prepositionSubjects,
@@ -364,11 +420,25 @@ function extractPurchaseSubjects(query: string): string[] {
     .filter(Boolean);
 }
 
+function extractListedThingSubjects(query: string): string[] {
+  const normalized = normalizeSubject(query);
+  return [
+    ...Array.from(normalized.matchAll(/\b(?:list of|list|models? of)\s+([^?.,;:]{2,80}?)(?:\s+(?:which|that|with|under|below|within|for|in|and)\b|$)/gi))
+      .map((match) => cleanSubject(match[1] || '')),
+    ...Array.from(normalized.matchAll(/\b([^?.,;:]{2,60}?)\s+(?:which|that)\s+(?:are|have|come|fit)\b/gi))
+      .map((match) => {
+        const tokens = cleanSubject(match[1] || '').split(/\s+/);
+        return tokens.slice(-3).join(' ');
+      }),
+  ].filter(Boolean);
+}
+
 function buildConstraintSearchQuery(query: string): string | null {
-  const product = extractPurchaseSubjects(query)[0] || extractCandidateSubjectsWithoutConstraints(query)[0];
+  const product = extractListedThingSubjects(query)[0] || extractPurchaseSubjects(query)[0] || extractCandidateSubjectsWithoutConstraints(query)[0];
   if (!product) return null;
 
   const constraints = [
+    extractMarketScope(query),
     extractBudgetConstraint(query),
     extractAttributeConstraint(query),
   ].filter(Boolean).join(' ');
@@ -396,17 +466,33 @@ function extractBudgetConstraint(query: string): string {
   return `under ${value}`;
 }
 
+function extractMarketScope(query: string): string {
+  if (/\b(?:rupees?|rs|inr|lakh|lakhs|crore|crores|₹)\b/i.test(query)) return 'India';
+  if (/\b(?:usd|dollars?|\$)\b/i.test(query)) return 'US';
+  if (/\b(?:gbp|£)\b/i.test(query)) return 'UK';
+  if (/\b(?:eur|€)\b/i.test(query)) return 'Europe';
+  return '';
+}
+
 function extractAttributeConstraint(query: string): string {
   const normalized = normalizeSubject(query)
     .replace(/\batleast\b/gi, 'at least')
     .replace(/\bminimum\b/gi, 'at least');
+  const operatorNormalized = query
+    .replace(/>=|=>/g, ' at least ')
+    .replace(/>/g, ' above ')
+    .replace(/\batleast\b/gi, 'at least')
+    .replace(/\bminimum\b/gi, 'at least');
   const withMatch = normalized.match(/\bwith\s+([^?.,;:]{2,120})/i);
-  const atLeastMatch = normalized.match(/\bat least\s+([^?.,;:]{2,80})/i);
+  const atLeastMatch = operatorNormalized.match(/\bat least\s+([^?.,;:]{2,80})/i);
+  const thresholdMatch = operatorNormalized.match(/(?:more than|above|over|at least)\s*([0-9][0-9.,]*\s*(?:cc|bhp|nm|kmpl|mah|hz|gb|tb|mp|inch|inches)\b)/i);
   const withText = cleanupAttributeText(withMatch?.[1] || '');
   const atLeastText = atLeastMatch ? cleanupAttributeText(`at least ${atLeastMatch[1]}`) : '';
+  const thresholdText = thresholdMatch ? cleanupAttributeText(`at least ${thresholdMatch[1]}`) : '';
   return dedupeQueries([
+    thresholdText,
     withText,
-    atLeastText && !withText.toLowerCase().includes(atLeastText.toLowerCase()) ? atLeastText : '',
+    !thresholdText && atLeastText && !withText.toLowerCase().includes(atLeastText.toLowerCase()) ? atLeastText : '',
   ]).join(' ');
 }
 
@@ -453,6 +539,25 @@ function stripAudienceContext(value: string): string {
   );
 }
 
+function extractSocialPlatforms(query: string): string[] {
+  const lower = query.toLowerCase();
+  const platforms: string[] = [];
+  if (/\b(twitter|x\.com|x)\b/.test(lower)) platforms.push('Twitter X');
+  if (/\breddit\b/.test(lower)) platforms.push('Reddit');
+  if (/\binstagram\b/.test(lower)) platforms.push('Instagram');
+  if (/\byoutube\b/.test(lower)) platforms.push('YouTube');
+  if (/\btiktok\b/.test(lower)) platforms.push('TikTok');
+  return dedupeQueries(platforms);
+}
+
+function extractLocationScope(query: string): string {
+  const normalized = normalizeSubject(query);
+  const matches = Array.from(normalized.matchAll(/\b(?:in|for|around)\s+([A-Za-z][A-Za-z\s-]{1,50}?)(?:\s+(?:today|now|currently|this week|this month|with|under|below|above|and)\b|$)/gi))
+    .map((match) => cleanSubject(match[1] || ''))
+    .filter(Boolean);
+  return matches[matches.length - 1] || '';
+}
+
 function stripQuestionFrame(value: string): string {
   return normalizeSubject(value)
     .replace(/\b(?:can|could|would)\s+(?:you|u)\b/gi, ' ')
@@ -468,6 +573,7 @@ function stripQuestionFrame(value: string): string {
 function normalizeSubject(value: string): string {
   return value
     .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/['’]/g, '')
     .replace(/[`*_#[\](){}<>]/g, ' ')
     .replace(/[?!,;:]+/g, ' ')
     .replace(/\b([a-z]+)(\d{2,5})\b/gi, '$1 $2')

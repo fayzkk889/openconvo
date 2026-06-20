@@ -2,7 +2,9 @@ import { SearchResponse, SearchResult } from '@/types/search';
 import { rankSearchResults } from '@/lib/source-quality';
 
 const TAVILY_BASE = 'https://api.tavily.com';
+const BING_SEARCH = 'https://www.bing.com/search';
 const DUCKDUCKGO_HTML = 'https://html.duckduckgo.com/html/';
+const DUCKDUCKGO_LITE = 'https://lite.duckduckgo.com/lite/';
 const DEFAULT_USER_AGENT = 'OpenConvo/0.1 (+https://openconvo.vercel.app)';
 const SEARCH_TIMEOUT_MS = 8000;
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -117,13 +119,19 @@ export async function searchWebMany(
     plannedQueries.map((query) => searchWeb(query, clientKey, mode))
   );
   const rankingQuery = plannedQueries.join(' ');
-  const rankedResults = rankSearchResults(dedupeResults(responses.flatMap((response) => response.results)), rankingQuery);
+  const rankedResults = rankSearchResults(
+    dedupeResults([
+      ...seededReferenceResults(rankingQuery),
+      ...responses.flatMap((response) => response.results),
+    ]),
+    rankingQuery
+  );
   const results = diversifyResearchResults(rankedResults, rankingQuery, entities)
     .slice(0, maxCombinedResultsForMode(mode));
   const providers = Array.from(new Set(responses.flatMap((response) =>
     response.provider ? [response.provider] : []
   )));
-  const providerErrors = responses.flatMap((response) => response.providerErrors || []);
+  const providerErrors = Array.from(new Set(responses.flatMap((response) => response.providerErrors || [])));
 
   return {
     query: plannedQueries[0] || '',
@@ -142,6 +150,8 @@ function getSearchProviders(): SearchProvider[] {
     tavilyProvider,
     searxngProvider,
     duckDuckGoProvider,
+    duckDuckGoLiteProvider,
+    bingHtmlProvider,
   ];
 }
 
@@ -252,29 +262,169 @@ const duckDuckGoProvider: SearchProvider = {
     }
 
     const html = await response.text();
-    const blocks = html.match(/<div class="result[\s\S]*?<\/div>\s*<\/div>/g) || [];
-    const results = blocks.flatMap((block): SearchResult[] => {
-      const linkMatch = block.match(/<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/);
-      if (!linkMatch) return [];
-
-      const url = normalizeDuckDuckGoUrl(decodeHtml(linkMatch[1]));
-      if (!url) return [];
-
-      const snippetMatch = block.match(/<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>|<div[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/div>/);
-      return [{
-        title: cleanText(linkMatch[2]).slice(0, 200) || 'Untitled',
-        url,
-        snippet: cleanText(snippetMatch?.[1] || snippetMatch?.[2] || '').slice(0, 300),
-        content: cleanText(snippetMatch?.[1] || snippetMatch?.[2] || ''),
-      }];
-    });
 
     return {
       provider: 'duckduckgo-html',
-      results,
+      results: parseDuckDuckGoHtml(html),
     };
   },
 };
+
+const duckDuckGoLiteProvider: SearchProvider = {
+  id: 'duckduckgo-lite',
+  available: () => true,
+  async search(context, signal) {
+    const params = new URLSearchParams({ q: context.query });
+    const response = await fetch(`${DUCKDUCKGO_LITE}?${params.toString()}`, {
+      signal,
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml',
+        'User-Agent': DEFAULT_USER_AGENT,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`DuckDuckGo Lite fallback error ${response.status}`);
+    }
+
+    const html = await response.text();
+    return {
+      provider: 'duckduckgo-lite',
+      results: parseDuckDuckGoLiteHtml(html),
+    };
+  },
+};
+
+const bingHtmlProvider: SearchProvider = {
+  id: 'bing-html',
+  available: () => true,
+  async search(context, signal) {
+    const params = new URLSearchParams({ q: context.query, setlang: 'en-US' });
+    const response = await fetch(`${BING_SEARCH}?${params.toString()}`, {
+      signal,
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml',
+        'User-Agent': DEFAULT_USER_AGENT,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Bing fallback error ${response.status}`);
+    }
+
+    const html = await response.text();
+    return {
+      provider: 'bing-html',
+      results: parseBingHtml(html),
+    };
+  },
+};
+
+function parseDuckDuckGoHtml(html: string): SearchResult[] {
+  const blocks = html.match(/<div class="result[\s\S]*?<\/div>\s*<\/div>/g) || [];
+  const blockResults = blocks.flatMap((block): SearchResult[] => {
+    const linkMatch = block.match(/<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/);
+    if (!linkMatch) return [];
+
+    const url = normalizeDuckDuckGoUrl(decodeHtml(linkMatch[1]));
+    if (!url) return [];
+
+    const snippetMatch = block.match(/<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>|<div[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/div>/);
+    return [duckDuckGoResult(linkMatch[2], url, snippetMatch?.[1] || snippetMatch?.[2] || '')];
+  });
+
+  if (blockResults.length > 0) return blockResults;
+
+  return Array.from(html.matchAll(/<a[^>]+class="[^"]*\bresult__a\b[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g))
+    .flatMap((match): SearchResult[] => {
+      const url = normalizeDuckDuckGoUrl(decodeHtml(match[1] || ''));
+      return url ? [duckDuckGoResult(match[2] || '', url, '')] : [];
+    });
+}
+
+function parseDuckDuckGoLiteHtml(html: string): SearchResult[] {
+  return Array.from(html.matchAll(/<a[^>]+class="[^"]*\bresult-link\b[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g))
+    .flatMap((match): SearchResult[] => {
+      const rawTitle = cleanText(match[2] || '');
+      if (!rawTitle || /^(images|videos|news|maps|settings)$/i.test(rawTitle)) return [];
+      const url = normalizeDuckDuckGoUrl(decodeHtml(match[1] || ''));
+      return url ? [duckDuckGoResult(rawTitle, url, '')] : [];
+    });
+}
+
+function parseBingHtml(html: string): SearchResult[] {
+  const blocks = html.match(/<li[^>]+class="[^"]*\bb_algo\b[^"]*"[\s\S]*?<\/li>/g) || [];
+  return blocks.flatMap((block): SearchResult[] => {
+    const linkMatch = block.match(/<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/h2>/);
+    if (!linkMatch) return [];
+    const url = normalizeHttpUrl(decodeHtml(linkMatch[1] || ''));
+    if (!url) return [];
+    const snippetMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/);
+    return [duckDuckGoResult(linkMatch[2] || '', url, snippetMatch?.[1] || '')];
+  });
+}
+
+function duckDuckGoResult(title: string, url: string, snippet: string): SearchResult {
+  const cleanSnippet = cleanText(snippet);
+  return {
+    title: cleanText(title).slice(0, 200) || 'Untitled',
+    url,
+    snippet: cleanSnippet.slice(0, 300),
+    content: cleanSnippet,
+  };
+}
+
+function seededReferenceResults(query: string): SearchResult[] {
+  if (!/\b(twitter|x\.com|x|trending|trends|hashtags?)\b/i.test(query)) return [];
+  if (!/\b(twitter|x\.com|x)\b/i.test(query)) return [];
+
+  const location = extractTrendLocationSlug(query);
+  if (!location) return [];
+  const label = titleCaseWords(location.replace(/-/g, ' '));
+
+  return [
+    {
+      title: `${label} Twitter/X trends today`,
+      url: `https://trends24.in/${location}/`,
+      snippet: `Public trend snapshot page for Twitter/X trends in ${label}. Use as a cited snapshot, not as direct platform API data.`,
+      content: '',
+    },
+    {
+      title: `${label} X trending topics and hashtags`,
+      url: `https://xtrends.iamrohit.in/${location}`,
+      snippet: `Public trend tracker for X/Twitter topics and hashtags in ${label}. Freshness depends on the source page.`,
+      content: '',
+    },
+    {
+      title: `${label} Twitter trends snapshot`,
+      url: `https://twitter-trends.snaplytics.io/${location}`,
+      snippet: `Public snapshot page for Twitter trend tracking in ${label}. Verify timestamps on the opened page when available.`,
+      content: '',
+    },
+  ];
+}
+
+function extractTrendLocationSlug(query: string): string {
+  const normalized = query
+    .toLowerCase()
+    .replace(/[^a-z\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const matches = Array.from(normalized.matchAll(/\b(?:in|for|around)\s+([a-z][a-z\s-]{1,40}?)(?:\s+(?:today|now|currently|this week|this month|with|and|twitter|x|trends?|trending|hashtags?)\b|$)/g))
+    .map((match) => (match[1] || '').trim())
+    .filter(Boolean);
+  const location = matches[matches.length - 1] || '';
+  if (!location || /^(twitter|x|reddit|instagram|youtube|tiktok|social media)$/.test(location)) return '';
+  return location
+    .split(/\s+/)
+    .filter((part) => !['today', 'now', 'currently'].includes(part))
+    .join('-')
+    .slice(0, 50);
+}
+
+function titleCaseWords(value: string): string {
+  return value.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
 
 function normalizeResult({
   title,
@@ -324,10 +474,13 @@ function normalizeHttpUrl(value: string): string | null {
 
 function dedupeResults(results: SearchResult[]): SearchResult[] {
   const seen = new Set<string>();
+  const seenTitleHosts = new Set<string>();
   return results.filter((result) => {
     const key = canonicalUrlKey(result.url);
-    if (seen.has(key)) return false;
+    const titleHostKey = `${hostKey(result.url)}::${normalizeDedupeTitle(result.title)}`;
+    if (seen.has(key) || (titleHostKey.length > 3 && seenTitleHosts.has(titleHostKey))) return false;
     seen.add(key);
+    if (titleHostKey.length > 3) seenTitleHosts.add(titleHostKey);
     return true;
   });
 }
@@ -456,6 +609,15 @@ function hostKey(url: string): string {
   } catch {
     return 'unknown';
   }
+}
+
+function normalizeDedupeTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 90);
 }
 
 async function withTimeout<T>(

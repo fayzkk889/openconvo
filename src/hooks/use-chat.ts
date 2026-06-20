@@ -7,6 +7,7 @@ import { AIModel } from '@/types/models';
 import { SearchResponse } from '@/types/search';
 import * as storage from '@/lib/storage';
 import { generateId } from '@/lib/utils';
+import { buildResearchFallbackAnswer } from '@/lib/research-fallback';
 
 const STREAM_FLUSH_MS = 18;
 const STREAM_FINISH_BUDGET_MS = 900;
@@ -324,6 +325,33 @@ export function useChat(
             } else {
               onModelOutcome?.({ modelId: runModel, taskType, outcome: 'failure' });
             }
+
+            const fallbackContent = buildClientResearchFallback(content.trim(), placeholderMessage.searchResults, errorMessage);
+            if (fallbackContent) {
+              const storedFallback = await storage.addMessage(conversationId, {
+                role: 'assistant',
+                content: fallbackContent,
+                model: runModel,
+                researchMode: shouldUseResearch,
+                agentMode: agentEnabled === true,
+                taskType,
+                autoRouted,
+                routingNote,
+                compareRun: runModels.length > 1,
+                searchResults: placeholderMessage.searchResults,
+                researchTrace: placeholderMessage.researchTrace,
+              });
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? storedFallback
+                    : m
+                )
+              );
+              if (!firstResponseContent) firstResponseContent = fallbackContent;
+              continue;
+            }
+
             setError(errorMessage);
             const storedError = await storage.addMessage(conversationId, {
               role: 'assistant',
@@ -576,6 +604,31 @@ export function useChat(
         } else {
           onModelOutcome?.({ modelId: model, taskType: targetMessage.taskType, outcome: 'failure' });
         }
+
+        const fallbackContent = buildClientResearchFallback(userMsg.content, targetMessage.searchResults, errorMessage);
+        if (fallbackContent) {
+          const storedFallback = await storage.addMessage(conversationId, {
+            role: 'assistant',
+            content: fallbackContent,
+            model,
+            researchMode: targetMessage.researchMode,
+            agentMode: targetMessage.agentMode,
+            taskType: targetMessage.taskType,
+            autoRouted: targetMessage.autoRouted,
+            routingNote: targetMessage.routingNote,
+            searchResults: targetMessage.searchResults,
+            researchTrace: targetMessage.researchTrace,
+          });
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? storedFallback
+                : m
+            )
+          );
+          return;
+        }
+
         setError(errorMessage);
         const storedError = await storage.addMessage(conversationId, {
           role: 'assistant',
@@ -753,6 +806,19 @@ function buildLocalTitle(content: string): string {
     .join(' ');
 
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'New conversation';
+}
+
+function buildClientResearchFallback(
+  question: string,
+  sources: Message['searchResults'],
+  reason: string
+): string | null {
+  if (!sources?.length) return null;
+  return buildResearchFallbackAnswer({
+    question,
+    sources,
+    reason,
+  });
 }
 
 function createStreamingDisplay(

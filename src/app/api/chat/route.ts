@@ -5,6 +5,7 @@ import { buildSystemPrompt } from '@/lib/prompts';
 import { SearchResult } from '@/types/search';
 import { Attachment, TaskType } from '@/types/chat';
 import { normalizeTaskType } from '@/lib/tasks';
+import { buildResearchFallbackAnswer } from '@/lib/research-fallback';
 
 const MAX_MESSAGES = 100;
 const MAX_MESSAGE_CHARS = 50000;
@@ -121,6 +122,7 @@ export async function POST(request: NextRequest) {
         const stream = new ReadableStream({
           async start(controller) {
             let buffer = '';
+            let emittedContent = '';
             const encoder = new TextEncoder();
             if (failedModels.length > 0 || rateLimitedModels.length > 0) {
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({
@@ -140,6 +142,7 @@ export async function POST(request: NextRequest) {
                 const parsed = JSON.parse(data);
                 const content = parsed.choices?.[0]?.delta?.content;
                 if (content) {
+                  emittedContent += content;
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content, model: usedModel })}\n\n`));
                 }
               } catch {
@@ -163,6 +166,14 @@ export async function POST(request: NextRequest) {
               buffer += decoder.decode();
               if (buffer.trim()) {
                 emitSseLine(buffer);
+              }
+              if (!emittedContent.trim() && researchMode && searchResults?.length) {
+                const fallback = buildResearchFallbackAnswer({
+                  question: lastUserQuestion(messages),
+                  sources: searchResults,
+                  reason: 'the selected free model returned an empty response',
+                });
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: fallback, model: usedModel, fallback: true })}\n\n`));
               }
             } catch (err) {
               controller.error(err);
@@ -228,6 +239,10 @@ export async function POST(request: NextRequest) {
       { status }
     );
   }
+}
+
+function lastUserQuestion(messages: ChatMessage[]): string {
+  return [...messages].reverse().find((message) => message.role === 'user')?.content || '';
 }
 
 function formatChatFailure(error: Error | null, failedModels: string[], skippedModels: string[]): string {

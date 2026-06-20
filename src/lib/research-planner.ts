@@ -101,11 +101,44 @@ function extractResearchEntities(query: string): string[] {
   const knownEntities = query.match(/\b(?:OpenAI|ChatGPT|GPT\s*-?\s*\d(?:\.\d)?|Codex|Claude(?:\s+Code)?|Opus\s+\d(?:\.\d)?|Sonnet\s+\d(?:\.\d)?|Haiku\s+\d(?:\.\d)?|Anthropic|Gemini(?:\s+\d(?:\.\d)?)?|Llama(?:\s+\d(?:\.\d)?)?|Mistral|Cohere|Perplexity|Manus|Cursor|Windsurf|Copilot|Vercel|Supabase|Firebase|Tavily|SearxNG|DuckDuckGo)\b/gi) || [];
   const titleCaseEntities = query.match(/\b[A-Z][A-Za-z0-9.+-]*(?:\s+[A-Z0-9][A-Za-z0-9.+-]*){0,3}\b/g) || [];
   const quotedEntities = Array.from(query.matchAll(/"([^"]{2,80})"|'([^']{2,80})'/g)).map((match) => match[1] || match[2]);
+  const subjectPhrases = extractSubjectPhrases(query);
 
-  return dedupeQueries([...knownEntities, ...titleCaseEntities, ...quotedEntities])
-    .map((entity) => entity.replace(/\s+/g, ' ').trim())
+  return dedupeQueries([...knownEntities, ...titleCaseEntities, ...quotedEntities, ...subjectPhrases])
+    .map(normalizeEntityPhrase)
     .filter((entity) => !/^(I|You|What|Which|Tell|Can|Should|The|This|That|And|Or|Vs)$/i.test(entity))
     .slice(0, 8);
+}
+
+function extractSubjectPhrases(query: string): string[] {
+  const phrases: string[] = [];
+  const patterns = [
+    /\b(?:features|specs|specifications|price|pricing|cost|review|reviews|news|updates|release|launch)\s+(?:of|for|on|about)\s+([^?.,;]{3,80})/gi,
+    /\b(?:latest|new|newest|current)\s+([^?.,;]{3,80})/gi,
+    /\b(?:what|which|tell me|show me).{0,40}\b(?:of|for|about)\s+([^?.,;]{3,80})/gi,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of query.matchAll(pattern)) {
+      if (match[1]) phrases.push(match[1]);
+    }
+  }
+
+  return phrases.map((phrase) =>
+    phrase
+      .replace(/\b(latest|current|new|newest|features|specs|specifications|price|pricing|cost|review|reviews|news|updates)\b/gi, ' ')
+      .replace(/\b(please|thanks|today|now)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  ).filter((phrase) => phrase.length >= 3);
+}
+
+function normalizeEntityPhrase(entity: string): string {
+  return entity
+    .replace(/^(?:of|for|about|on)\s+/i, '')
+    .replace(/\bgt\s*650\b/gi, 'GT 650')
+    .replace(/\b([a-z]+)(\d{2,4})\b/gi, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function dedupeQueries(queries: string[]): string[] {

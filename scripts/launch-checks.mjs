@@ -34,6 +34,7 @@ const sidebar = read('src/components/sidebar.tsx');
 const emptyState = read('src/components/empty-state.tsx');
 const composer = read('src/components/composer.tsx');
 const workflowStarters = read('src/lib/workflow-starters.ts');
+const researchFallback = read('src/lib/research-fallback.ts');
 const layout = read('src/app/layout.tsx');
 const ogImage = read('src/app/opengraph-image.tsx');
 const globals = read('src/app/globals.css');
@@ -74,6 +75,7 @@ check('web extraction caches fetched pages', /pageCache/.test(webExtract) && /PA
 check('research mode plans multiple queries', /planResearchQueries/.test(searchRoute) && /searchWebMany/.test(searchLib) && /MAX_PLANNED_QUERIES\s*=\s*8/.test(researchPlanner));
 check('auto mode has broad web research triggers', /needsWebResearch/.test(read('src/lib/tasks.ts')) && /latest\|current/.test(read('src/lib/tasks.ts')) && /looksLikeExternalDecision/.test(read('src/lib/tasks.ts')));
 check('research planner builds generic entity evidence queries', /extractResearchEntities/.test(researchPlanner) && /entityEvidenceQueries/.test(researchPlanner) && /official pricing/.test(researchPlanner));
+check('research planner extracts product subjects from feature questions', /extractSubjectPhrases/.test(researchPlanner) && /features\|specs\|specifications/.test(researchPlanner) && /normalizeEntityPhrase/.test(researchPlanner));
 check('deep research mode expands query and source depth', /deep-research/.test(searchRoute) && /MAX_DEEP_PLANNED_QUERIES/.test(researchPlanner) && /maxCombinedResultsForMode/.test(searchLib));
 check('research trace is saved on messages', /researchTrace/.test(useChat) && /buildResearchTrace/.test(useChat));
 check('research trace renders in source panel', /Research trace/.test(messageComponent) && /plannedQueries/.test(messageComponent));
@@ -85,6 +87,7 @@ check('source quality is exposed to prompts and UI', /Quality:/.test(prompts) &&
 check('chat route preserves source quality for prompting', /sourceScore/.test(chatRoute) && /sourceReason/.test(chatRoute));
 check('research prompts include current date and stale-memory guardrails', /Current Date/.test(prompts) && /stale memory/.test(prompts));
 check('research prompts forbid knowledge-cutoff phrasing', /based on my current knowledge/.test(prompts) && /knowledge cutoff/.test(prompts) && /must be grounded/.test(prompts));
+check('research failures fall back to source-backed answers', /buildResearchFallbackAnswer/.test(researchFallback) && /buildClientResearchFallback/.test(useChat) && /emittedContent/.test(chatRoute));
 check('research reports are extracted as artifacts', /extractResearchReportArtifact/.test(artifactsLib) && /Research Evidence/.test(artifactsLib));
 check('artifacts can be exported directly', /handleDownload/.test(read('src/components/artifact-panel.tsx')) && /artifactExtension/.test(read('src/components/artifact-panel.tsx')));
 check('database migration repairs artifact indexes', /artifactStore\.indexNames\.contains\('by-project'\)/.test(db));

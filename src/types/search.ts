@@ -5,6 +5,9 @@ export interface SearchResult {
   content?: string;
   extracted?: boolean;
   fetchedAt?: number;
+  sourceScore?: number;
+  sourceLabel?: string;
+  sourceReason?: string;
 }
 
 export interface SearchResponse {

@@ -18,6 +18,8 @@ const searchRoute = read('src/app/api/search/route.ts');
 const searchLib = read('src/lib/search.ts');
 const webExtract = read('src/lib/web-extract.ts');
 const researchPlanner = read('src/lib/research-planner.ts');
+const sourceQuality = read('src/lib/source-quality.ts');
+const prompts = read('src/lib/prompts.ts');
 const db = read('src/lib/db.ts');
 const exportLib = read('src/lib/export.ts');
 const markdown = read('src/lib/markdown.tsx');
@@ -69,6 +71,8 @@ check('web extraction blocks local network fetches', /isBlockedHostname/.test(we
 check('research mode plans multiple queries', /planResearchQueries/.test(searchRoute) && /searchWebMany/.test(searchLib) && /MAX_PLANNED_QUERIES/.test(researchPlanner));
 check('research trace is saved on messages', /researchTrace/.test(useChat) && /buildResearchTrace/.test(useChat));
 check('research trace renders in source panel', /Research trace/.test(messageComponent) && /plannedQueries/.test(messageComponent));
+check('search results are quality ranked', /rankSearchResults/.test(searchLib) && /sourceScore/.test(sourceQuality));
+check('source quality is exposed to prompts and UI', /Quality:/.test(prompts) && /sourceLabel/.test(messageComponent));
 check('database migration repairs artifact indexes', /artifactStore\.indexNames\.contains\('by-project'\)/.test(db));
 check('imports repair unsafe model ids', /resolveSafeModelId/.test(exportLib));
 check('imports cap large text fields', /MAX_MESSAGE_CHARS/.test(exportLib) && /MAX_ARTIFACT_CHARS/.test(exportLib));

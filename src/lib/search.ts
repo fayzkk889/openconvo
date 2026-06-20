@@ -1,4 +1,5 @@
 import { SearchResponse, SearchResult } from '@/types/search';
+import { rankSearchResults } from '@/lib/source-quality';
 
 const TAVILY_BASE = 'https://api.tavily.com';
 const DUCKDUCKGO_HTML = 'https://html.duckduckgo.com/html/';
@@ -45,7 +46,7 @@ export async function searchWeb(
           query,
           answer: result.answer,
           provider: result.provider,
-          results: dedupeResults(result.results).slice(0, maxResultsForMode(mode)),
+          results: rankSearchResults(dedupeResults(result.results), query).slice(0, maxResultsForMode(mode)),
         };
       }
     } catch (error) {
@@ -70,7 +71,7 @@ export async function searchWebMany(
   const responses = await Promise.all(
     plannedQueries.map((query) => searchWeb(query, clientKey, mode))
   );
-  const results = dedupeResults(responses.flatMap((response) => response.results))
+  const results = rankSearchResults(dedupeResults(responses.flatMap((response) => response.results)), plannedQueries[0] || '')
     .slice(0, mode === 'research' ? 12 : 6);
   const providers = Array.from(new Set(responses.flatMap((response) =>
     response.provider ? [response.provider] : []

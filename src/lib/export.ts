@@ -294,6 +294,9 @@ function normalizeImportedSearchResults(value: unknown): SearchResultRef[] | und
       content: typeof result.content === 'string' ? result.content.slice(0, 5000) : undefined,
       extracted: typeof result.extracted === 'boolean' ? result.extracted : undefined,
       fetchedAt: typeof result.fetchedAt === 'number' ? result.fetchedAt : undefined,
+      sourceScore: typeof result.sourceScore === 'number' ? Math.max(0, Math.min(100, Math.floor(result.sourceScore))) : undefined,
+      sourceLabel: typeof result.sourceLabel === 'string' ? result.sourceLabel.slice(0, 40) : undefined,
+      sourceReason: typeof result.sourceReason === 'string' ? result.sourceReason.slice(0, 200) : undefined,
     }];
   });
 

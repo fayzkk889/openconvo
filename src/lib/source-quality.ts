@@ -68,7 +68,8 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   const reasons: string[] = [];
   let score = 50;
   const isPrimaryHost = PRIMARY_HOST_PATTERNS.some((pattern) => pattern.test(host));
-  const isModelPricingQuery = /\b(gpt|openai|codex|chatgpt|claude|anthropic|opus|sonnet|haiku|gemini|model|models|pricing|price|cost|pocket friendly)\b/.test(query.toLowerCase());
+  const lowerQuery = query.toLowerCase();
+  const needsPrimaryEvidence = /\b(price|cost|pricing|stock|market|funding|revenue|law|legal|regulation|policy|medical|health|safety|release|released|launch|available|availability|official|docs|documentation|api|model|models)\b/.test(lowerQuery);
   const looksLikeComparisonContent = /\b(vs|versus|benchmark|benchmarks|compared|wins?|showdown)\b/.test(haystack);
 
   if (isPrimaryHost) {
@@ -101,12 +102,12 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
     reasons.push('lower-signal host');
   }
 
-  if (isModelPricingQuery && !isPrimaryHost) {
+  if (needsPrimaryEvidence && !isPrimaryHost) {
     score -= 12;
-    reasons.push('not an official model source');
+    reasons.push('not a primary source');
   }
 
-  if (isModelPricingQuery && looksLikeComparisonContent && !isPrimaryHost) {
+  if (needsPrimaryEvidence && looksLikeComparisonContent && !isPrimaryHost) {
     score -= 10;
     reasons.push('comparison page, not primary evidence');
   }

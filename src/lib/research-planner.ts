@@ -25,22 +25,31 @@ export function planResearchQueries(query: string, options?: { deep?: boolean })
 function intentQueries(query: string): string[] {
   const lower = query.toLowerCase();
   const queries: string[] = [];
+  const entities = extractResearchEntities(query);
 
-  if (/\b(gpt|openai|codex|chatgpt|claude|anthropic|opus|sonnet|haiku|claude code|gemini|google|llama|meta|mistral|cohere|model|models|pricing|price|cost|pocket friendly)\b/.test(lower)) {
-    queries.push(...modelOfficialQueries(lower));
+  if (entities.length > 0) {
+    queries.push(...entityEvidenceQueries(entities, lower));
+  }
+
+  if (/\b(official|docs|documentation|api|github|open source|opensource|developer|framework|library|software|tool|app|platform|service|company|product|model|models)\b/.test(lower)) {
+    queries.push(`${query} official`);
+    queries.push(`${query} documentation`);
   }
 
   if (/\b(latest|current|today|recent|newest|2025|2026|news|release|launched?)\b/.test(lower)) {
     queries.push(`${query} latest updates`);
+    queries.push(`${query} official news`);
   }
 
   if (/\b(compare|versus|vs\.?|alternative|best|which|choose|recommend)\b/.test(lower)) {
     queries.push(`${query} comparison`);
     queries.push(`${query} pros cons`);
+    queries.push(`${query} official documentation pricing`);
   }
 
   if (/\b(price|cost|pricing|stock|market|funding|revenue)\b/.test(lower)) {
     queries.push(`${query} pricing market data`);
+    queries.push(`${query} official pricing`);
   }
 
   if (/\b(security|privacy|risk|legal|compliance|policy)\b/.test(lower)) {
@@ -56,49 +65,22 @@ function intentQueries(query: string): string[] {
     : [`${query} overview`, `${query} key facts`];
 }
 
-function modelOfficialQueries(lowerQuery: string): string[] {
-  const specificQueries: string[] = [];
-  const generalQueries: string[] = [];
+function entityEvidenceQueries(entities: string[], lowerQuery: string): string[] {
+  const wantsPricing = /\b(price|cost|pricing|cheap|cheaper|pocket friendly|subscription|plan|free tier)\b/.test(lowerQuery);
+  const wantsRelease = /\b(latest|current|today|recent|newest|release|released|launch|launched|available|availability)\b/.test(lowerQuery);
+  const wantsDocs = /\b(api|docs|documentation|github|open source|opensource|developer|framework|library|code)\b/.test(lowerQuery);
+  const wantsComparison = /\b(compare|versus|vs\.?|alternative|best|which|choose|recommend|better)\b/.test(lowerQuery);
+  const queries: string[] = [];
 
-  if (/\b(gpt|openai|codex|chatgpt)\b/.test(lowerQuery)) {
-    if (/\bcodex\b/.test(lowerQuery)) {
-      specificQueries.push('OpenAI Codex official documentation');
-      specificQueries.push('ChatGPT Codex official');
-    }
-    if (/\bgpt\s*-?\s*5|gpt5\b/.test(lowerQuery)) {
-      specificQueries.push('OpenAI GPT-5 official documentation');
-    }
-    generalQueries.push('OpenAI models pricing official');
-    generalQueries.push('OpenAI model documentation official');
+  for (const entity of entities.slice(0, 5)) {
+    queries.push(`${entity} official`);
+    if (wantsDocs) queries.push(`${entity} official documentation GitHub`);
+    if (wantsPricing) queries.push(`${entity} official pricing`);
+    if (wantsRelease) queries.push(`${entity} official latest release news`);
+    if (wantsComparison) queries.push(`${entity} reviews benchmarks limitations`);
   }
 
-  if (/\b(claude|anthropic|opus|sonnet|haiku)\b/.test(lowerQuery)) {
-    if (/\bclaude code\b/.test(lowerQuery)) {
-      specificQueries.push('Anthropic Claude Code official documentation');
-    }
-    if (/\bopus\b/.test(lowerQuery)) {
-      if (/\bopus\s*4(?:\.|-)?8\b/.test(lowerQuery)) {
-        specificQueries.push('Anthropic Claude Opus 4.8 official');
-      }
-      specificQueries.push('Anthropic Claude Opus official');
-      specificQueries.push('Anthropic Claude Opus pricing official');
-    }
-    generalQueries.push('Anthropic Claude models pricing official');
-    generalQueries.push('Anthropic Claude documentation official');
-  }
-
-  if (/\b(gemini|google)\b/.test(lowerQuery)) {
-    generalQueries.push('Google Gemini models pricing official');
-  }
-
-  if (/\b(llama|meta)\b/.test(lowerQuery)) {
-    generalQueries.push('Meta Llama models official');
-  }
-
-  const queries = [...specificQueries, ...generalQueries];
-  return queries.length > 0
-    ? dedupeQueries(queries)
-    : ['AI model pricing official documentation'];
+  return queries;
 }
 
 function deepResearchQueries(query: string): string[] {
@@ -113,6 +95,17 @@ function deepResearchQueries(query: string): string[] {
 
 function normalizeQuery(query: string): string {
   return query.replace(/\s+/g, ' ').trim().slice(0, 500);
+}
+
+function extractResearchEntities(query: string): string[] {
+  const knownEntities = query.match(/\b(?:OpenAI|ChatGPT|GPT\s*-?\s*\d(?:\.\d)?|Codex|Claude(?:\s+Code)?|Opus\s+\d(?:\.\d)?|Sonnet\s+\d(?:\.\d)?|Haiku\s+\d(?:\.\d)?|Anthropic|Gemini(?:\s+\d(?:\.\d)?)?|Llama(?:\s+\d(?:\.\d)?)?|Mistral|Cohere|Perplexity|Manus|Cursor|Windsurf|Copilot|Vercel|Supabase|Firebase|Tavily|SearxNG|DuckDuckGo)\b/gi) || [];
+  const titleCaseEntities = query.match(/\b[A-Z][A-Za-z0-9.+-]*(?:\s+[A-Z0-9][A-Za-z0-9.+-]*){0,3}\b/g) || [];
+  const quotedEntities = Array.from(query.matchAll(/"([^"]{2,80})"|'([^']{2,80})'/g)).map((match) => match[1] || match[2]);
+
+  return dedupeQueries([...knownEntities, ...titleCaseEntities, ...quotedEntities])
+    .map((entity) => entity.replace(/\s+/g, ' ').trim())
+    .filter((entity) => !/^(I|You|What|Which|Tell|Can|Should|The|This|That|And|Or|Vs)$/i.test(entity))
+    .slice(0, 8);
 }
 
 function dedupeQueries(queries: string[]): string[] {

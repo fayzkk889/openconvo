@@ -97,14 +97,15 @@ export function inferTaskType({
   searchEnabled?: boolean;
   researchEnabled?: boolean;
 }): TaskType {
-  const text = content.toLowerCase();
+  const rawText = content;
+  const text = rawText.toLowerCase();
 
   if (attachments?.length) return 'file';
   if (/\b(deep research|deep dive|comprehensive research|full research|thorough research|market map|research report|literature review|competitive analysis)\b/.test(text)) {
     return 'deep-research';
   }
   if (researchEnabled || searchEnabled) return 'research';
-  if (needsWebResearch(text)) {
+  if (needsWebResearch(rawText)) {
     return 'research';
   }
   if (/\b(code|bug|debug|typescript|javascript|react|next\.?js|api|function|component|error|stack trace|compile|build|database|sql|python)\b/.test(text)) {
@@ -121,13 +122,49 @@ export function inferTaskType({
 }
 
 function needsWebResearch(text: string): boolean {
-  if (/\b(source|sources|cite|citation|research|latest|current|today|yesterday|tomorrow|this week|this month|recent|newest|news|market|price|stock|weather|score|release|released|launch|launched|available|compare|comparison|versus|vs\.?|verify|fact check|fact-check)\b/.test(text)) {
+  const lower = text.toLowerCase();
+
+  if (isObviouslyLocalOrPersonal(lower)) {
+    return false;
+  }
+
+  if (/\b(source|sources|cite|citation|research|verify|fact check|fact-check|is this true|confirm)\b/.test(lower)) {
     return true;
   }
 
-  if (/\b(gpt|openai|codex|chatgpt|claude|anthropic|opus|sonnet|haiku|claude code|gemini|google ai|llama|mistral|cohere|model|models)\b/.test(text) && /\b(better|best|which|choose|recommend|compare|cost|price|pricing|cheap|cheaper|pocket friendly|worth|available|released)\b/.test(text)) {
+  if (/\b(latest|current|currently|today|yesterday|tomorrow|this week|this month|this year|recent|newest|news|breaking|now|live|as of)\b/.test(lower)) {
+    return true;
+  }
+
+  if (/\b(weather|score|fixture|schedule|standings|stock|share price|crypto|exchange rate|inflation|interest rate|election|law|legal|regulation|policy|visa|deadline)\b/.test(lower)) {
+    return true;
+  }
+
+  if (/\b(price|cost|pricing|cheap|cheaper|pocket friendly|subscription|plan|free tier|available|availability|released|release date|launch|launched)\b/.test(lower)) {
+    return true;
+  }
+
+  if (/\b(compare|comparison|versus|vs\.?|alternative|alternatives|better|best|which one|which is|choose|recommend|recommendation|worth it|should i use|should i buy)\b/.test(lower) && looksLikeExternalDecision(text)) {
     return true;
   }
 
   return false;
+}
+
+function isObviouslyLocalOrPersonal(text: string): boolean {
+  return /\b(my file|attached|attachment|this document|my code|this code|above text|my note|my notes|rewrite this|summarize this)\b/.test(text);
+}
+
+function looksLikeExternalDecision(text: string): boolean {
+  const lower = text.toLowerCase();
+
+  if (/\b(product|tool|app|software|service|platform|library|framework|api|model|phone|laptop|camera|car|course|company|vendor|provider|hosting|database|cloud)\b/.test(lower)) {
+    return true;
+  }
+
+  if (/\b(gpt|openai|codex|chatgpt|claude|anthropic|opus|sonnet|haiku|gemini|google ai|llama|mistral|cohere|perplexity|manus|cursor|windsurf|copilot|notion|slack|figma|vercel|supabase|firebase)\b/.test(lower)) {
+    return true;
+  }
+
+  return /\b[A-Z][A-Za-z0-9.+-]{2,}\b/.test(text);
 }

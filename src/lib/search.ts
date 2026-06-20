@@ -89,7 +89,7 @@ export async function searchWebMany(
     plannedQueries.map((query) => searchWeb(query, clientKey, mode))
   );
   const rankedResults = rankSearchResults(dedupeResults(responses.flatMap((response) => response.results)), plannedQueries[0] || '');
-  const results = diversifyComparisonResults(rankedResults, plannedQueries[0] || '')
+  const results = diversifyResearchResults(rankedResults, plannedQueries[0] || '')
     .slice(0, maxCombinedResultsForMode(mode));
   const providers = Array.from(new Set(responses.flatMap((response) =>
     response.provider ? [response.provider] : []
@@ -323,7 +323,32 @@ function maxCombinedResultsForMode(mode: SearchMode): number {
   return mode === 'research' ? 12 : 6;
 }
 
+function diversifyResearchResults(results: SearchResult[], query: string): SearchResult[] {
+  const comparisonResults = diversifyComparisonResults(results, query);
+  const selected = new Map<string, SearchResult>();
+  const hostCounts = new Map<string, number>();
+
+  for (const result of comparisonResults) {
+    const host = hostKey(result.url);
+    const count = hostCounts.get(host) || 0;
+    if (count >= 3) continue;
+    selected.set(canonicalUrlKey(result.url), result);
+    hostCounts.set(host, count + 1);
+  }
+
+  for (const result of comparisonResults) {
+    selected.set(canonicalUrlKey(result.url), result);
+  }
+
+  return Array.from(selected.values());
+}
+
 function diversifyComparisonResults(results: SearchResult[], query: string): SearchResult[] {
+  const entities = comparisonEntities(query);
+  if (entities.length >= 2) {
+    return diversifyByEntities(results, entities);
+  }
+
   const lower = query.toLowerCase();
   const needsOpenAI = /\b(openai|gpt|codex|chatgpt)\b/.test(lower);
   const needsAnthropic = /\b(anthropic|claude|opus|sonnet|haiku|claude code)\b/.test(lower);
@@ -354,6 +379,64 @@ function diversifyComparisonResults(results: SearchResult[], query: string): Sea
   }
 
   return Array.from(selected.values());
+}
+
+function diversifyByEntities(results: SearchResult[], entities: string[]): SearchResult[] {
+  const selected = new Map<string, SearchResult>();
+  for (const entity of entities.slice(0, 6)) {
+    const pattern = entityPattern(entity);
+    const result = results.find((item) => pattern.test(`${item.title} ${item.snippet} ${item.url}`));
+    if (result) selected.set(canonicalUrlKey(result.url), result);
+  }
+
+  const hostCounts = new Map<string, number>();
+  for (const result of selected.values()) {
+    const host = hostKey(result.url);
+    hostCounts.set(host, (hostCounts.get(host) || 0) + 1);
+  }
+
+  for (const result of results) {
+    const host = hostKey(result.url);
+    const count = hostCounts.get(host) || 0;
+    if (count < 2) {
+      selected.set(canonicalUrlKey(result.url), result);
+      hostCounts.set(host, count + 1);
+    }
+  }
+
+  for (const result of results) {
+    selected.set(canonicalUrlKey(result.url), result);
+  }
+
+  return Array.from(selected.values());
+}
+
+function comparisonEntities(query: string): string[] {
+  if (!/\b(compare|comparison|versus|vs\.?|alternative|best|which|choose|recommend|better)\b/i.test(query)) {
+    return [];
+  }
+
+  const known = query.match(/\b(?:OpenAI|ChatGPT|GPT\s*-?\s*\d(?:\.\d)?|Codex|Claude(?:\s+Code)?|Opus\s+\d(?:\.\d)?|Sonnet\s+\d(?:\.\d)?|Haiku\s+\d(?:\.\d)?|Anthropic|Gemini(?:\s+\d(?:\.\d)?)?|Llama(?:\s+\d(?:\.\d)?)?|Mistral|Cohere|Perplexity|Manus|Cursor|Windsurf|Copilot|Vercel|Supabase|Firebase|Tavily|SearxNG|DuckDuckGo)\b/gi) || [];
+  const splitEntities = query
+    .split(/\b(?:vs\.?|versus|or|and|\+)\b|,/i)
+    .map((part) => part.replace(/\b(which|one|is|better|best|should|i|use|choose|tell|me|can|you|with|for|pocket|friendly|cheap|cheaper)\b/gi, ' '))
+    .map((part) => part.replace(/\s+/g, ' ').trim())
+    .filter((part) => part.length >= 3 && part.length <= 80);
+
+  return Array.from(new Set([...known, ...splitEntities].map((entity) => entity.trim()).filter(Boolean))).slice(0, 8);
+}
+
+function entityPattern(entity: string): RegExp {
+  const escaped = entity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  return new RegExp(escaped, 'i');
+}
+
+function hostKey(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return 'unknown';
+  }
 }
 
 function addRepresentativeResult(

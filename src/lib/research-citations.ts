@@ -8,7 +8,7 @@ export function ensureResearchCitations(content: string, sources?: CitationSourc
     .filter((source) => source.title && source.url)
     .slice(0, 6);
 
-  if (!content.trim() || usefulSources.length === 0 || hasSourcesSection(content)) {
+  if (!content.trim() || usefulSources.length === 0 || hasRealSourceLinks(content, usefulSources)) {
     return content;
   }
 
@@ -26,6 +26,11 @@ export function buildSourcesSection(sources: CitationSource[]): string {
 
 function hasSourcesSection(content: string): boolean {
   return /(^|\n)#{0,3}\s*(sources|references|citations)\s*($|\n)/i.test(content);
+}
+
+function hasRealSourceLinks(content: string, sources: CitationSource[]): boolean {
+  if (!hasSourcesSection(content)) return false;
+  return sources.some((source) => content.includes(source.url));
 }
 
 function cleanTitle(title: string): string {

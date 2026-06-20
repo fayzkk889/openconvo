@@ -44,13 +44,6 @@ export function Message({
   const hasSearchResults =
     message.searchResults && message.searchResults.length > 0;
   const researchTrace = message.researchTrace;
-  const sourceDomains = hasSearchResults
-    ? Array.from(
-        new Set(
-          message.searchResults!.map((source) => getSourceDomain(source.url)).filter(Boolean)
-        )
-      )
-    : [];
   const taskPreset = message.taskType && message.taskType !== 'auto'
     ? TASK_PRESETS.find((task) => task.id === message.taskType)
     : null;
@@ -221,19 +214,7 @@ export function Message({
           {hasSearchResults && (
             <div className="mt-4 w-full">
               {message.researchMode && (
-                <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--color-text-tertiary)]">
-                  <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2 py-1">
-                    {message.searchResults!.length} sources reviewed
-                  </span>
-                  {sourceDomains.slice(0, 3).map((domain) => (
-                    <span
-                      key={domain}
-                      className="rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2 py-1"
-                    >
-                      {domain}
-                    </span>
-                  ))}
-                </div>
+                <SourcePills sources={message.searchResults!} />
               )}
               <button
                 onClick={() => setSourcesOpen(!sourcesOpen)}
@@ -335,7 +316,7 @@ export function Message({
           {/* Actions */}
           {!isStreaming && message.content && (
             <div className={cn(
-              'mt-2 transition-opacity md:opacity-0 md:group-hover:opacity-100',
+              'mt-2 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 hover:opacity-100',
               isUser && 'self-end'
             )}>
               <MessageActions
@@ -360,4 +341,49 @@ function getSourceDomain(url: string): string {
   } catch {
     return '';
   }
+}
+
+function SourcePills({ sources }: { sources: NonNullable<MessageType['searchResults']> }) {
+  const visibleSources = sources.slice(0, 4);
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-[var(--color-text-tertiary)]">
+      <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2 py-1">
+        {sources.length} sources reviewed
+      </span>
+      {visibleSources.map((source, index) => {
+        const safeUrl = safeExternalUrl(source.url);
+        const domain = getSourceDomain(source.url) || 'source';
+        const content = (
+          <>
+            <span className="font-semibold text-[var(--color-text-primary)]">[{index + 1}]</span>
+            <span>{domain}</span>
+          </>
+        );
+
+        if (!safeUrl) {
+          return (
+            <span
+              key={`${source.url}-${index}`}
+              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2 py-1"
+            >
+              {content}
+            </span>
+          );
+        }
+
+        return (
+          <a
+            key={`${source.url}-${index}`}
+            href={safeUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2 py-1 transition-colors hover:border-[var(--color-border-light)] hover:text-[var(--color-text-primary)]"
+            title={source.title}
+          >
+            {content}
+          </a>
+        );
+      })}
+    </div>
+  );
 }

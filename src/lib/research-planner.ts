@@ -67,6 +67,7 @@ const STOP_WORDS = new Set([
   'now',
   'of',
   'on',
+  'one',
   'or',
   'please',
   'recent',

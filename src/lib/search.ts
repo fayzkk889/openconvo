@@ -357,7 +357,7 @@ function parseBingHtml(html: string): SearchResult[] {
   return blocks.flatMap((block): SearchResult[] => {
     const linkMatch = block.match(/<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/h2>/);
     if (!linkMatch) return [];
-    const url = normalizeHttpUrl(decodeHtml(linkMatch[1] || ''));
+    const url = normalizeBingUrl(decodeHtml(linkMatch[1] || ''));
     if (!url) return [];
     const snippetMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/);
     return [duckDuckGoResult(linkMatch[2] || '', url, snippetMatch?.[1] || '')];
@@ -375,6 +375,13 @@ function duckDuckGoResult(title: string, url: string, snippet: string): SearchRe
 }
 
 function seededReferenceResults(query: string): SearchResult[] {
+  return [
+    ...seededTrendResults(query),
+    ...seededShoppingResults(query),
+  ];
+}
+
+function seededTrendResults(query: string): SearchResult[] {
   if (!/\b(twitter|x\.com|x|trending|trends|hashtags?)\b/i.test(query)) return [];
   if (!/\b(twitter|x\.com|x)\b/i.test(query)) return [];
 
@@ -399,6 +406,34 @@ function seededReferenceResults(query: string): SearchResult[] {
       title: `${label} Twitter trends snapshot`,
       url: `https://twitter-trends.snaplytics.io/${location}`,
       snippet: `Public snapshot page for Twitter trend tracking in ${label}. Verify timestamps on the opened page when available.`,
+      content: '',
+    },
+  ];
+}
+
+function seededShoppingResults(query: string): SearchResult[] {
+  if (!/\b(india|rupees?|rs|inr|lakh|₹|under|below|budget|price|prices|buy|buying|recommend|phones?|smartphones?|laptops?|mobiles?)\b/i.test(query)) return [];
+  if (!/\b(phones?|smartphones?|laptops?|mobiles?|tablets?|earbuds?|headphones?|monitors?|bikes?|motorcycles?)\b/i.test(query)) return [];
+
+  const compact = query.toLowerCase().replace(/\s+/g, ' ').trim();
+  const encoded = encodeURIComponent(compact);
+  return [
+    {
+      title: 'India product prices and comparison search - Smartprix',
+      url: `https://www.smartprix.com/products/?q=${encoded}`,
+      snippet: 'Indian product comparison and price-discovery source. Use it to verify current market options and prices.',
+      content: '',
+    },
+    {
+      title: 'India mobile and gadget buying guides - 91mobiles',
+      url: `https://www.91mobiles.com/search_page.php?q=${encoded}`,
+      snippet: 'India-focused phone and gadget database with prices, specifications, and buying filters.',
+      content: '',
+    },
+    {
+      title: 'India technology buying guides and prices - Gadgets 360',
+      url: `https://www.gadgets360.com/search?searchtext=${encoded}`,
+      snippet: 'India technology publication with phone, gadget, and laptop price/spec coverage.',
       content: '',
     },
   ];
@@ -456,6 +491,27 @@ function normalizeDuckDuckGoUrl(value: string): string | null {
     return normalizeHttpUrl(uddg || url.href);
   } catch {
     return null;
+  }
+}
+
+function normalizeBingUrl(value: string): string | null {
+  try {
+    const url = new URL(value, BING_SEARCH);
+    const encodedTarget = url.searchParams.get('u');
+    const decodedTarget = encodedTarget ? decodeBingTarget(encodedTarget) : '';
+    return normalizeHttpUrl(decodedTarget || url.href);
+  } catch {
+    return null;
+  }
+}
+
+function decodeBingTarget(value: string): string {
+  try {
+    const normalized = value.startsWith('a1') ? value.slice(2) : value;
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    return Buffer.from(padded.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+  } catch {
+    return '';
   }
 }
 

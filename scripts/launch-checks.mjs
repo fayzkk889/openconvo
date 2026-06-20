@@ -117,7 +117,10 @@ check('research prompts forbid knowledge-cutoff phrasing', /based on my current 
 check('research prompt asks for verdict-first compact answers', /Start with a short direct answer or verdict/.test(prompts) && /small comparison table/.test(prompts));
 check('research prompts support social trend snapshots', /public trend trackers/.test(prompts) && /direct Twitter, Reddit, or platform API access/.test(prompts));
 check('research failures fall back to source-backed answers', /buildResearchFallbackAnswer/.test(researchFallback) && /buildClientResearchFallback/.test(useChat) && /emittedContent/.test(chatRoute));
-check('research answers enforce visible source citations', /ensureResearchCitations/.test(researchCitations) && /buildSourcesSection/.test(researchCitations) && /hasRealSourceLinks/.test(researchCitations) && /citations/.test(chatRoute));
+check('research answers enforce visible source citations', /ensureResearchCitations/.test(researchCitations) && /buildSourcesSection/.test(researchCitations) && /stripSourcesSections/.test(researchCitations) && /citations/.test(chatRoute));
+check('shopping research seeds India product sources', /seededShoppingResults/.test(searchLib) && /Smartprix/.test(searchLib) && /91mobiles/.test(searchLib) && /Gadgets 360/.test(searchLib));
+check('Bing fallback decodes redirect targets', /normalizeBingUrl/.test(searchLib) && /decodeBingTarget/.test(searchLib));
+check('research planner understands compact shopping budgets', /normalizeCompactBudget/.test(researchPlanner) && /extractProductCategorySubjects/.test(researchPlanner));
 check('research source pills are visible above source panel', /SourcePills/.test(messageComponent) && /\[\{index \+ 1\}\]/.test(messageComponent));
 check('research loading state explains source drafting', /Drafting from sources/.test(messageComponent) && /Sources will be attached/.test(messageComponent));
 check('message actions stay clickable while hovering', !/opacity-0 group-hover:opacity-100/.test(messageActions) && !/md:opacity-0/.test(messageComponent) && /relative z-10 mt-2 opacity-100/.test(messageComponent));

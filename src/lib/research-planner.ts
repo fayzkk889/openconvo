@@ -89,6 +89,7 @@ const STOP_WORDS = new Set([
   's',
   'should',
   'show',
+  'some',
   'tell',
   'than',
   'that',
@@ -373,6 +374,7 @@ function extractCandidateSubjects(query: string): string[] {
   const strippedQuery = stripQuestionFrame(query);
   const namedSubjects = extractNamedSubjects(strippedQuery);
   const listedThingSubjects = extractListedThingSubjects(query);
+  const productCategorySubjects = extractProductCategorySubjects(query);
   const purchaseSubjects = extractPurchaseSubjects(query);
   const comparisonParts = extractComparisonSubjects(strippedQuery);
   const prepositionSubjects = Array.from(strippedQuery.matchAll(/\b(?:of|for|about|on|regarding|between)\s+([^?.,;:]{3,120})/gi))
@@ -384,6 +386,7 @@ function extractCandidateSubjects(query: string): string[] {
     ...quoted,
     ...namedSubjects,
     ...listedThingSubjects,
+    ...productCategorySubjects,
     ...purchaseSubjects,
     ...comparisonParts,
     ...prepositionSubjects,
@@ -417,6 +420,15 @@ function extractNamedSubjects(query: string): string[] {
 function extractPurchaseSubjects(query: string): string[] {
   return Array.from(query.matchAll(/\b(?:buy|purchase|get|choose)\s+(?:a|an|the)?\s*([^?.,;:]{2,80}?)(?:\s+(?:with|under|below|within|for|that|which|and)\b|$)/gi))
     .map((match) => cleanSubject(match[1] || ''))
+    .filter((subject) => !/^(?:in|for|under|below|within)\b/i.test(subject))
+    .filter(Boolean);
+}
+
+function extractProductCategorySubjects(query: string): string[] {
+  const normalized = normalizeSubject(query);
+  const productWords = '(?:phones?|smartphones?|laptops?|mobiles?|bikes?|motorcycles?|cars?|tablets?|earbuds?|headphones?|monitors?|keyboards?|mice|cameras?)';
+  return Array.from(normalized.matchAll(new RegExp(`\\b((?:[a-z0-9]+\\s+){0,3}${productWords})\\b`, 'gi')))
+    .map((match) => cleanSubject(match[1] || ''))
     .filter(Boolean);
 }
 
@@ -434,7 +446,7 @@ function extractListedThingSubjects(query: string): string[] {
 }
 
 function buildConstraintSearchQuery(query: string): string | null {
-  const product = extractListedThingSubjects(query)[0] || extractPurchaseSubjects(query)[0] || extractCandidateSubjectsWithoutConstraints(query)[0];
+  const product = extractListedThingSubjects(query)[0] || extractProductCategorySubjects(query)[0] || extractPurchaseSubjects(query)[0] || extractCandidateSubjectsWithoutConstraints(query)[0];
   if (!product) return null;
 
   const constraints = [
@@ -460,18 +472,30 @@ function extractCandidateSubjectsWithoutConstraints(query: string): string[] {
 
 function extractBudgetConstraint(query: string): string {
   const normalized = normalizeSubject(query);
-  const budgetMatch = normalized.match(/\b(?:budget\s+(?:of|is)?|under|below|within|less than|up to)\s+(.{1,80}?)(?:\s+(?:and|with|for|to|want|buy|purchase)\b|$)/i);
+  const budgetMatch = normalized.match(/\b(?:budget\s+(?:of|is)?|under|below|within|less than|up to)\s+(.{1,80}?)(?:\s+(?:and|with|for|to|want|buy|purchase|available|in)\b|$)/i);
   const value = budgetMatch?.[1]?.trim() || '';
+  const compactBudget = normalizeCompactBudget(value, query);
+  if (compactBudget) return `under ${compactBudget}`;
   if (!/\b(?:rupees?|rs|inr|lakh|lakhs|crore|crores|dollars?|\$|usd|eur|€|gbp|£)\b/i.test(value)) return '';
   return `under ${value}`;
 }
 
 function extractMarketScope(query: string): string {
+  if (/\bindia\b/i.test(query)) return 'India';
   if (/\b(?:rupees?|rs|inr|lakh|lakhs|crore|crores|₹)\b/i.test(query)) return 'India';
   if (/\b(?:usd|dollars?|\$)\b/i.test(query)) return 'US';
   if (/\b(?:gbp|£)\b/i.test(query)) return 'UK';
   if (/\b(?:eur|€)\b/i.test(query)) return 'Europe';
   return '';
+}
+
+function normalizeCompactBudget(value: string, query: string): string {
+  const match = value.match(/\b(\d+(?:\.\d+)?)\s*k\b/i);
+  if (!match) return '';
+  const amount = Math.round(Number(match[1]) * 1000);
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  const currency = extractMarketScope(query) === 'India' ? 'rupees' : '';
+  return [String(amount), currency].filter(Boolean).join(' ');
 }
 
 function extractAttributeConstraint(query: string): string {

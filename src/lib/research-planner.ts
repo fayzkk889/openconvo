@@ -26,6 +26,10 @@ function intentQueries(query: string): string[] {
   const lower = query.toLowerCase();
   const queries: string[] = [];
 
+  if (/\b(gpt|openai|claude|anthropic|gemini|google|llama|meta|mistral|cohere|model|models|pricing|price|cost)\b/.test(lower)) {
+    queries.push(...modelOfficialQueries(lower));
+  }
+
   if (/\b(latest|current|today|recent|newest|2025|2026|news|release|launched?)\b/.test(lower)) {
     queries.push(`${query} latest updates`);
   }
@@ -50,6 +54,32 @@ function intentQueries(query: string): string[] {
   return queries.length > 0
     ? queries
     : [`${query} overview`, `${query} key facts`];
+}
+
+function modelOfficialQueries(lowerQuery: string): string[] {
+  const queries: string[] = [];
+
+  if (/\b(gpt|openai)\b/.test(lowerQuery)) {
+    queries.push('OpenAI models pricing official');
+    queries.push('OpenAI model documentation official');
+  }
+
+  if (/\b(claude|anthropic)\b/.test(lowerQuery)) {
+    queries.push('Anthropic Claude models pricing official');
+    queries.push('Anthropic Claude documentation official');
+  }
+
+  if (/\b(gemini|google)\b/.test(lowerQuery)) {
+    queries.push('Google Gemini models pricing official');
+  }
+
+  if (/\b(llama|meta)\b/.test(lowerQuery)) {
+    queries.push('Meta Llama models official');
+  }
+
+  return queries.length > 0
+    ? queries
+    : ['AI model pricing official documentation'];
 }
 
 function deepResearchQueries(query: string): string[] {

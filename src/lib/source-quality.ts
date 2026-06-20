@@ -7,6 +7,17 @@ const PRIMARY_HOST_PATTERNS = [
   /(^|\.)arxiv\.org$/i,
   /(^|\.)who\.int$/i,
   /(^|\.)wikipedia\.org$/i,
+  /(^|\.)openai\.com$/i,
+  /(^|\.)anthropic\.com$/i,
+  /(^|\.)claude\.com$/i,
+  /(^|\.)google\.com$/i,
+  /(^|\.)googleapis\.com$/i,
+  /(^|\.)googleblog\.com$/i,
+  /(^|\.)ai\.google\.dev$/i,
+  /(^|\.)openrouter\.ai$/i,
+  /(^|\.)meta\.com$/i,
+  /(^|\.)mistral\.ai$/i,
+  /(^|\.)cohere\.com$/i,
 ];
 
 const OFFICIAL_PATH_HINTS = [
@@ -31,6 +42,14 @@ const LOW_SIGNAL_HOST_HINTS = [
   'facebook.',
   'instagram.',
   'tiktok.',
+  'lindleylabs.',
+  'aitools.',
+  'toolify.',
+  'futurepedia.',
+  'aimadetools.',
+  'digitalapplied.',
+  'codingfleet.',
+  'mindstudio.',
 ];
 
 export function rankSearchResults(results: SearchResult[], query: string): SearchResult[] {
@@ -48,8 +67,11 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   const overlap = queryTerms.filter((term) => haystack.includes(term)).length;
   const reasons: string[] = [];
   let score = 50;
+  const isPrimaryHost = PRIMARY_HOST_PATTERNS.some((pattern) => pattern.test(host));
+  const isModelPricingQuery = /\b(gpt|openai|claude|anthropic|gemini|model|models|pricing|price|cost)\b/.test(query.toLowerCase());
+  const looksLikeComparisonContent = /\b(vs|versus|benchmark|benchmarks|compared|wins?|showdown)\b/.test(haystack);
 
-  if (PRIMARY_HOST_PATTERNS.some((pattern) => pattern.test(host))) {
+  if (isPrimaryHost) {
     score += 18;
     reasons.push('primary source domain');
   }
@@ -77,6 +99,16 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   if (LOW_SIGNAL_HOST_HINTS.some((hint) => host.includes(hint))) {
     score -= 12;
     reasons.push('lower-signal host');
+  }
+
+  if (isModelPricingQuery && !isPrimaryHost) {
+    score -= 12;
+    reasons.push('not an official model source');
+  }
+
+  if (isModelPricingQuery && looksLikeComparisonContent && !isPrimaryHost) {
+    score -= 10;
+    reasons.push('comparison page, not primary evidence');
   }
 
   if (!result.snippet && !result.content) {

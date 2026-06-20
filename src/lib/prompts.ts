@@ -24,13 +24,16 @@ export function buildSystemPrompt({
   attachments?: Attachment[];
 }): string {
   let prompt = customPrompt || DEFAULT_SYSTEM_PROMPT;
+  const currentDate = new Date().toISOString().slice(0, 10);
+
+  prompt += `\n\n## Current Date\nToday is ${currentDate}. For time-sensitive questions, answer relative to this date. Do not mention an old knowledge cutoff as evidence; use the provided web/search context when available, and say what is not verified when the sources are insufficient.`;
 
   if (activeModel) {
     prompt += `\n\n## Active Model\nThe active model identifier for this response is "${activeModel}". If the user asks what model you are, or asks a follow-up that refers to an earlier model-identification answer, answer using this active model identifier and do not repeat earlier model-identification answers from the conversation history.`;
   }
 
   if (researchMode) {
-    prompt += '\n\n## Research Mode\nThe user requested a research-style answer. Be more thorough than a normal chat response: synthesize evidence, call out uncertainty, organize findings clearly, and cite sources for factual claims when sources are available.';
+    prompt += '\n\n## Research Mode\nThe user requested a research-style answer. Be more thorough than a normal chat response: synthesize evidence, call out uncertainty, organize findings clearly, and cite sources for factual claims when sources are available. Prioritize official, primary, and high-quality sources. If the sources do not verify a named product, model, price, or claim, say that it is not verified instead of filling gaps from stale memory.';
   }
 
   if (taskType === 'deep-research') {
@@ -51,7 +54,7 @@ export function buildSystemPrompt({
     searchResults.forEach((result, i) => {
       prompt += `<source index="${i + 1}">\nTitle: ${result.title}\nURL: ${result.url}\n${result.sourceLabel ? `Quality: ${result.sourceLabel}${typeof result.sourceScore === 'number' ? ` (${result.sourceScore}/100)` : ''}${result.sourceReason ? ` - ${result.sourceReason}` : ''}\n` : ''}Snippet: ${result.snippet}\n${result.content ? `Content: ${result.content.slice(0, 1500)}\n` : ''}</source>\n\n`;
     });
-    prompt += 'When answering, reference the sources above where appropriate. If the search results don\'t contain relevant information, say so and answer based on your knowledge.';
+    prompt += 'When answering, reference the sources above where appropriate. Do not treat a search result title by itself as proof. If the search results are low-quality, speculative, contradictory, or do not directly verify the user\'s named item, clearly say so and avoid making a definitive claim.';
   }
 
   if (attachments && attachments.length > 0) {

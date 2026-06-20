@@ -72,12 +72,16 @@ check('web search enriches results with page extraction', /enrichSearchResults/.
 check('web extraction blocks local network fetches', /isBlockedHostname/.test(webExtract) && /169/.test(webExtract) && /192/.test(webExtract));
 check('web extraction caches fetched pages', /pageCache/.test(webExtract) && /PAGE_CACHE_TTL_MS/.test(webExtract));
 check('research mode plans multiple queries', /planResearchQueries/.test(searchRoute) && /searchWebMany/.test(searchLib) && /MAX_PLANNED_QUERIES/.test(researchPlanner));
+check('research planner prefers official model pricing sources', /modelOfficialQueries/.test(researchPlanner) && /OpenAI models pricing official/.test(researchPlanner) && /Anthropic Claude models pricing official/.test(researchPlanner));
 check('deep research mode expands query and source depth', /deep-research/.test(searchRoute) && /MAX_DEEP_PLANNED_QUERIES/.test(researchPlanner) && /maxCombinedResultsForMode/.test(searchLib));
 check('research trace is saved on messages', /researchTrace/.test(useChat) && /buildResearchTrace/.test(useChat));
 check('research trace renders in source panel', /Research trace/.test(messageComponent) && /plannedQueries/.test(messageComponent));
 check('research progress is visible before synthesis', /researchStatus/.test(useChat) && /ResearchProgress/.test(read('src/components/chat-area.tsx')));
 check('search results are quality ranked', /rankSearchResults/.test(searchLib) && /sourceScore/.test(sourceQuality));
+check('source quality favors official model providers', /openai\\.com/.test(sourceQuality) && /claude\\.com/.test(sourceQuality) && /not an official model source/.test(sourceQuality));
 check('source quality is exposed to prompts and UI', /Quality:/.test(prompts) && /sourceLabel/.test(messageComponent));
+check('chat route preserves source quality for prompting', /sourceScore/.test(chatRoute) && /sourceReason/.test(chatRoute));
+check('research prompts include current date and stale-memory guardrails', /Current Date/.test(prompts) && /stale memory/.test(prompts));
 check('research reports are extracted as artifacts', /extractResearchReportArtifact/.test(artifactsLib) && /Research Evidence/.test(artifactsLib));
 check('artifacts can be exported directly', /handleDownload/.test(read('src/components/artifact-panel.tsx')) && /artifactExtension/.test(read('src/components/artifact-panel.tsx')));
 check('database migration repairs artifact indexes', /artifactStore\.indexNames\.contains\('by-project'\)/.test(db));

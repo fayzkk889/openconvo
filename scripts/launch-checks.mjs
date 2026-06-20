@@ -87,6 +87,7 @@ check('search dedupes repeated titles from the same host', /seenTitleHosts/.test
 check('research mode plans multiple queries', /planResearchQueries/.test(searchRoute) && /searchWebMany/.test(searchLib) && /MAX_PLANNED_QUERIES\s*=\s*8/.test(researchPlanner));
 check('research mode uses model planner before heuristic fallback', /generateResearchPlan/.test(searchRoute) && /planner:\s*'model'/.test(searchRoute) && /planner:\s*'heuristic'/.test(searchRoute));
 check('auto mode has broad web research triggers', /needsWebResearch/.test(tasks) && /latest\|current/.test(tasks) && /looksLikeExternalDecision/.test(tasks));
+check('auto mode keeps casual greetings out of research', /isCasualGreeting/.test(tasks) && /return 'quick'/.test(tasks));
 check('auto mode routes social trends to research', /trending\|trends\|viral/.test(tasks) && /twitter\|x\\\.com\|reddit/.test(tasks));
 check('auto mode routes budget and spec lists to research', /budget\|under\|below\|within/.test(tasks) && /cc\|bhp\|nm\|kmpl/.test(tasks) && /give me the list/.test(tasks));
 check('research planner uses generic query analysis', /analyzeResearchQuery/.test(researchPlanner) && /inferResearchIntent/.test(researchPlanner) && /extractCandidateSubjects/.test(researchPlanner));
@@ -94,6 +95,7 @@ check('research planner avoids topic-specific subject hardcoding', !/OpenAI|Chat
 check('research planner decomposes by intent and subject', /subjectQueries/.test(researchPlanner) && /intentQueries/.test(researchPlanner) && /STOP_WORDS/.test(researchPlanner));
 check('research planner handles comparisons without topic dictionaries', /extractComparisonSubjects/.test(researchPlanner) && /stripAudienceContext/.test(researchPlanner));
 check('research planner strips generic question frames', /stripQuestionFrame/.test(researchPlanner) && /which\|what/.test(researchPlanner) && /should\|can\|could/.test(researchPlanner));
+check('research planner extracts latest-development topics', /extractKnowledgeTopic/.test(researchPlanner) && /knowledgeNewsQueries/.test(researchPlanner));
 check('research planner handles purchase constraints generically', /buildConstraintSearchQuery/.test(researchPlanner) && /extractPurchaseSubjects/.test(researchPlanner) && /extractBudgetConstraint/.test(researchPlanner));
 check('research planner derives market scope from currency', /extractMarketScope/.test(researchPlanner) && /inr/.test(researchPlanner) && /India/.test(researchPlanner));
 check('research planner handles live events generically', /liveEvent/.test(researchPlanner) && /extractNamedSubjects/.test(researchPlanner) && /official schedule fixtures results/.test(researchPlanner));
@@ -107,6 +109,7 @@ check('source quality favors primary evidence across topics', /needsPrimaryEvide
 check('source quality understands live event evidence', /needsLiveEventEvidence/.test(sourceQuality) && /event data terms/.test(sourceQuality));
 check('source quality understands social trend evidence', /needsTrendEvidence/.test(sourceQuality) && /trend snapshot terms/.test(sourceQuality) && /TREND_SNAPSHOT_HOST_HINTS/.test(sourceQuality));
 check('source quality downranks generic social landing pages', /generic social landing page/.test(sourceQuality) && /explore\|home\|login/.test(sourceQuality));
+check('source quality downranks dictionaries for non-definition research', /REFERENCE_HOST_HINTS/.test(sourceQuality) && /reference source for non-definition query/.test(sourceQuality));
 check('comparison search keeps evidence diverse across entities and hosts', /diversifyResearchResults/.test(searchLib) && /diversifyByEntities/.test(searchLib) && /hostKey/.test(searchLib));
 check('provider errors are deduplicated across planned queries', /new Set\(responses\.flatMap/.test(searchLib));
 check('comparison search has no topic-specific vendor branch', !/needsOpenAI|needsAnthropic|sourceFamily|addRepresentativeResult/.test(searchLib));
@@ -119,9 +122,12 @@ check('research prompts support social trend snapshots', /public trend trackers/
 check('research failures fall back to source-backed answers', /buildResearchFallbackAnswer/.test(researchFallback) && /buildClientResearchFallback/.test(useChat) && /emittedContent/.test(chatRoute));
 check('research answers enforce visible source citations', /ensureResearchCitations/.test(researchCitations) && /buildSourcesSection/.test(researchCitations) && /stripSourcesSections/.test(researchCitations) && /citations/.test(chatRoute));
 check('shopping research seeds India product sources', /seededShoppingResults/.test(searchLib) && /Smartprix/.test(searchLib) && /91mobiles/.test(searchLib) && /Gadgets 360/.test(searchLib));
+check('AI development research seeds official AI sources', /seededKnowledgeResults/.test(searchLib) && /OpenAI News/.test(searchLib) && /Google DeepMind Blog/.test(searchLib));
+check('seeded research sources are labeled as a provider', /source-seeds/.test(searchLib) && /seededResults/.test(searchLib));
 check('Bing fallback decodes redirect targets', /normalizeBingUrl/.test(searchLib) && /decodeBingTarget/.test(searchLib));
 check('research planner understands compact shopping budgets', /normalizeCompactBudget/.test(researchPlanner) && /extractProductCategorySubjects/.test(researchPlanner));
 check('research source pills are visible above source panel', /SourcePills/.test(messageComponent) && /\[\{index \+ 1\}\]/.test(messageComponent));
+check('research source details are collapsed by default', /useState\(false\)/.test(messageComponent) && /Sources \(\{message\.searchResults!\.length\}\)/.test(messageComponent));
 check('research loading state explains source drafting', /Drafting from sources/.test(messageComponent) && /Sources will be attached/.test(messageComponent));
 check('message actions stay clickable while hovering', !/opacity-0 group-hover:opacity-100/.test(messageActions) && !/md:opacity-0/.test(messageComponent) && /relative z-10 mt-2 opacity-100/.test(messageComponent));
 check('markdown tables remain contained', /overflow-x: auto/.test(globals) && /vertical-align: top/.test(globals));

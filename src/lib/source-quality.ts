@@ -12,11 +12,13 @@ const PRIMARY_HOST_PATTERNS = [
   /(^|\.)google\.com$/i,
   /(^|\.)googleapis\.com$/i,
   /(^|\.)googleblog\.com$/i,
+  /(^|\.)deepmind\.google$/i,
   /(^|\.)ai\.google\.dev$/i,
   /(^|\.)openrouter\.ai$/i,
   /(^|\.)meta\.com$/i,
   /(^|\.)mistral\.ai$/i,
   /(^|\.)cohere\.com$/i,
+  /(^|\.)huggingface\.co$/i,
 ];
 
 const OFFICIAL_PATH_HINTS = [
@@ -63,6 +65,17 @@ const LOW_SIGNAL_HOST_HINTS = [
   'rumor.',
 ];
 
+const REFERENCE_HOST_HINTS = [
+  'dictionary.',
+  'merriam-webster.',
+  'cambridge.',
+  'oxfordlearnersdictionaries.',
+  'thefreedictionary.',
+  'dictionary.com',
+  'britannica.',
+  'wikipedia.',
+];
+
 const TREND_SNAPSHOT_HOST_HINTS = [
   'trends24.',
   'xtrends.',
@@ -100,6 +113,7 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   const needsPrimaryEvidence = /\b(price|cost|pricing|stock|market|funding|revenue|law|legal|regulation|policy|medical|health|safety|release|released|launch|available|availability|official|docs|documentation|api|model|models)\b/.test(lowerQuery);
   const needsLiveEventEvidence = /\b(schedule|schedules|fixture|fixtures|match|matches|today|tonight|live|score|scores|result|results|winner|winners|loser|losers|standings|table|bracket|tournament|cup|league|championship)\b/.test(lowerQuery);
   const needsTrendEvidence = /\b(twitter|x\.com|reddit|instagram|youtube|tiktok|social media|trending|trends|viral|hot topics?|hashtags?)\b/.test(lowerQuery);
+  const wantsDefinition = /\b(define|definition|meaning|synonym|what does|what is the meaning)\b/.test(lowerQuery);
   const looksLikeComparisonContent = /\b(vs|versus|benchmark|benchmarks|compared|wins?|showdown)\b/.test(haystack);
 
   if (isPrimaryHost) {
@@ -160,6 +174,11 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   if (LOW_SIGNAL_HOST_HINTS.some((hint) => host.includes(hint))) {
     score -= 12;
     reasons.push('lower-signal host');
+  }
+
+  if (!wantsDefinition && REFERENCE_HOST_HINTS.some((hint) => host.includes(hint))) {
+    score -= 24;
+    reasons.push('reference source for non-definition query');
   }
 
   if (needsPrimaryEvidence && !isPrimaryHost) {

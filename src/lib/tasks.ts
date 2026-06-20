@@ -101,6 +101,7 @@ export function inferTaskType({
   const text = rawText.toLowerCase();
 
   if (attachments?.length) return 'file';
+  if (isCasualGreeting(text)) return 'quick';
   if (/\b(deep research|deep dive|comprehensive research|full research|thorough research|market map|research report|literature review|competitive analysis)\b/.test(text)) {
     return 'deep-research';
   }
@@ -161,6 +162,10 @@ function needsWebResearch(text: string): boolean {
 
 function isObviouslyLocalOrPersonal(text: string): boolean {
   return /\b(my file|attached|attachment|this document|my code|this code|above text|my note|my notes|rewrite this|summarize this)\b/.test(text);
+}
+
+function isCasualGreeting(text: string): boolean {
+  return /^(hi+|hii+|hey+|hello+|yo+|sup|thanks?|thank you|ok|okay|hmm|lol)[\s!.?]*$/i.test(text.trim());
 }
 
 function looksLikeExternalDecision(text: string): boolean {

@@ -38,7 +38,7 @@ export function Message({
   onDelete,
   onPrefer,
 }: MessageProps) {
-  const [sourcesOpen, setSourcesOpen] = useState(message.researchMode === true);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
   const hasSearchResults =

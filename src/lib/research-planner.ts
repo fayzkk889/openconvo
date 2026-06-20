@@ -55,6 +55,8 @@ const STOP_WORDS = new Set([
   'did',
   'do',
   'does',
+  'development',
+  'developments',
   'else',
   'for',
   'from',
@@ -115,6 +117,7 @@ const STOP_WORDS = new Set([
   'who',
   'why',
   'with',
+  'world',
   'year',
   'you',
 ]);
@@ -187,10 +190,10 @@ export function planResearchQueries(query: string, options?: { deep?: boolean })
   const originalQuery = normalizeQuery(query);
   const analysis = analyzeResearchQuery(originalQuery);
   const candidates = [
-    originalQuery,
     ...priorityIntentQueries(analysis),
     ...subjectQueries(analysis),
     ...intentQueries(analysis),
+    originalQuery,
     `${originalQuery} sources`,
     `${originalQuery} analysis`,
     ...(options?.deep ? deepResearchQueries(analysis) : []),
@@ -282,6 +285,20 @@ function priorityIntentQueries(analysis: ResearchAnalysis): string[] {
   return [
     ...socialTrendQueries(analysis),
     ...constraintQueries(analysis),
+    ...knowledgeNewsQueries(analysis),
+  ];
+}
+
+function knowledgeNewsQueries(analysis: ResearchAnalysis): string[] {
+  if (!analysis.intent.freshness) return [];
+  const topic = extractKnowledgeTopic(analysis.originalQuery) || analysis.subjects[0];
+  if (!topic) return [];
+
+  return [
+    `${topic} latest news`,
+    `${topic} latest developments`,
+    `${topic} recent breakthroughs research`,
+    `${topic} official announcements`,
   ];
 }
 
@@ -371,6 +388,7 @@ function deepResearchQueries(analysis: ResearchAnalysis): string[] {
 
 function extractCandidateSubjects(query: string): string[] {
   const quoted = Array.from(query.matchAll(/"([^"]{2,100})"|'([^']{2,100})'/g)).map((match) => match[1] || match[2]);
+  const knowledgeTopic = extractKnowledgeTopic(query);
   const strippedQuery = stripQuestionFrame(query);
   const namedSubjects = extractNamedSubjects(strippedQuery);
   const listedThingSubjects = extractListedThingSubjects(query);
@@ -384,6 +402,7 @@ function extractCandidateSubjects(query: string): string[] {
 
   return dedupeQueries([
     ...quoted,
+    knowledgeTopic,
     ...namedSubjects,
     ...listedThingSubjects,
     ...productCategorySubjects,
@@ -415,6 +434,20 @@ function extractNamedSubjects(query: string): string[] {
     .filter((subject) => subject.length >= 2)
     .filter((subject) => subject.split(/\s+/).length <= 6)
     .slice(0, MAX_SUBJECTS);
+}
+
+function extractKnowledgeTopic(query: string): string {
+  const normalized = normalizeSubject(query);
+  const patterns = [
+    /\b(?:latest|recent|new|newest|current)\s+(?:development|developments|news|updates|breakthroughs?)\s+(?:in|about|on|around)\s+([^?.,;:]{2,80}?)(?:\s+(?:world|industry|space|field|sector|market)\b|$)/i,
+    /\b(?:development|developments|news|updates|breakthroughs?)\s+(?:in|about|on|around)\s+([^?.,;:]{2,80}?)(?:\s+(?:world|industry|space|field|sector|market)\b|$)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    const topic = cleanSubject(match?.[1] || '');
+    if (topic) return topic;
+  }
+  return '';
 }
 
 function extractPurchaseSubjects(query: string): string[] {

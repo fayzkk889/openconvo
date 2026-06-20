@@ -119,9 +119,10 @@ export async function searchWebMany(
     plannedQueries.map((query) => searchWeb(query, clientKey, mode))
   );
   const rankingQuery = plannedQueries.join(' ');
+  const seededResults = seededReferenceResults(rankingQuery);
   const rankedResults = rankSearchResults(
     dedupeResults([
-      ...seededReferenceResults(rankingQuery),
+      ...seededResults,
       ...responses.flatMap((response) => response.results),
     ]),
     rankingQuery
@@ -129,8 +130,8 @@ export async function searchWebMany(
   const results = diversifyResearchResults(rankedResults, rankingQuery, entities)
     .slice(0, maxCombinedResultsForMode(mode));
   const providers = Array.from(new Set(responses.flatMap((response) =>
-    response.provider ? [response.provider] : []
-  )));
+    response.provider && response.provider !== 'none' ? [response.provider] : []
+  ).concat(seededResults.length > 0 ? ['source-seeds'] : [])));
   const providerErrors = Array.from(new Set(responses.flatMap((response) => response.providerErrors || [])));
 
   return {
@@ -378,6 +379,7 @@ function seededReferenceResults(query: string): SearchResult[] {
   return [
     ...seededTrendResults(query),
     ...seededShoppingResults(query),
+    ...seededKnowledgeResults(query),
   ];
 }
 
@@ -434,6 +436,50 @@ function seededShoppingResults(query: string): SearchResult[] {
       title: 'India technology buying guides and prices - Gadgets 360',
       url: `https://www.gadgets360.com/search?searchtext=${encoded}`,
       snippet: 'India technology publication with phone, gadget, and laptop price/spec coverage.',
+      content: '',
+    },
+  ];
+}
+
+function seededKnowledgeResults(query: string): SearchResult[] {
+  if (!/\b(latest|recent|current|news|developments?|breakthroughs?|updates?|announcements?)\b/i.test(query)) return [];
+  if (!/\b(ai|artificial intelligence|machine learning|llm|llms|generative ai|foundation models?)\b/i.test(query)) return [];
+
+  return [
+    {
+      title: 'OpenAI News',
+      url: 'https://openai.com/news/',
+      snippet: 'Official OpenAI announcements and product/research updates.',
+      content: '',
+    },
+    {
+      title: 'Anthropic News',
+      url: 'https://www.anthropic.com/news',
+      snippet: 'Official Anthropic news, Claude updates, research, and company announcements.',
+      content: '',
+    },
+    {
+      title: 'Google AI Blog',
+      url: 'https://blog.google/technology/ai/',
+      snippet: 'Google AI announcements, Gemini updates, research, and product news.',
+      content: '',
+    },
+    {
+      title: 'Google DeepMind Blog',
+      url: 'https://deepmind.google/discover/blog/',
+      snippet: 'Google DeepMind research and AI systems announcements.',
+      content: '',
+    },
+    {
+      title: 'Meta AI Blog',
+      url: 'https://ai.meta.com/blog/',
+      snippet: 'Meta AI research, model releases, and open-source AI updates.',
+      content: '',
+    },
+    {
+      title: 'Hugging Face Blog',
+      url: 'https://huggingface.co/blog',
+      snippet: 'AI model, tooling, dataset, and open-source machine-learning updates.',
       content: '',
     },
   ];

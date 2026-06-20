@@ -4,6 +4,9 @@ import { rankSearchResults } from '@/lib/source-quality';
 const TAVILY_BASE = 'https://api.tavily.com';
 const DUCKDUCKGO_HTML = 'https://html.duckduckgo.com/html/';
 const DEFAULT_USER_AGENT = 'OpenConvo/0.1 (+https://openconvo.vercel.app)';
+const SEARCH_TIMEOUT_MS = 8000;
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
+const SEARCH_CACHE_MAX = 80;
 
 export type SearchMode = 'search' | 'research' | 'deep-research';
 
@@ -22,14 +25,20 @@ type SearchProviderResult = {
 type SearchProvider = {
   id: string;
   available: (context: SearchProviderContext) => boolean;
-  search: (context: SearchProviderContext) => Promise<SearchProviderResult>;
+  search: (context: SearchProviderContext, signal: AbortSignal) => Promise<SearchProviderResult>;
 };
+
+const searchCache = new Map<string, { expiresAt: number; response: SearchResponse }>();
 
 export async function searchWeb(
   query: string,
   clientKey?: string | null,
   mode: SearchMode = 'search'
 ): Promise<SearchResponse> {
+  const cacheKey = searchCacheKey(query, clientKey, mode);
+  const cached = getCachedSearch(cacheKey);
+  if (cached) return cached;
+
   const context: SearchProviderContext = {
     query,
     mode,
@@ -40,15 +49,21 @@ export async function searchWeb(
   for (const provider of getSearchProviders()) {
     if (!provider.available(context)) continue;
     try {
-      const result = await provider.search(context);
+      const result = await withTimeout(
+        (signal) => provider.search(context, signal),
+        SEARCH_TIMEOUT_MS,
+        `${provider.id} timed out`
+      );
       if (result.results.length > 0 || result.answer) {
-        return {
+        const response = {
           query,
           answer: result.answer,
           provider: result.provider,
           mode,
           results: rankSearchResults(dedupeResults(result.results), query).slice(0, maxResultsForMode(mode)),
         };
+        setCachedSearch(cacheKey, response);
+        return response;
       }
     } catch (error) {
       providerErrors.push(`${provider.id}: ${error instanceof Error ? error.message : 'failed'}`);
@@ -103,12 +118,13 @@ function getSearchProviders(): SearchProvider[] {
 const tavilyProvider: SearchProvider = {
   id: 'tavily',
   available: (context) => Boolean(context.clientTavilyKey || process.env.TAVILY_API_KEY),
-  async search(context) {
+  async search(context, signal) {
     const apiKey = context.clientTavilyKey || process.env.TAVILY_API_KEY;
     if (!apiKey) throw new Error('Tavily key is missing');
 
     const response = await fetch(`${TAVILY_BASE}/search`, {
       method: 'POST',
+      signal,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -146,7 +162,7 @@ const tavilyProvider: SearchProvider = {
 const searxngProvider: SearchProvider = {
   id: 'searxng',
   available: () => Boolean(process.env.SEARXNG_URL),
-  async search(context) {
+  async search(context, signal) {
     const baseUrl = process.env.SEARXNG_URL;
     if (!baseUrl) throw new Error('SearxNG URL is missing');
 
@@ -157,6 +173,7 @@ const searxngProvider: SearchProvider = {
     url.searchParams.set('safesearch', '1');
 
     const response = await fetch(url.href, {
+      signal,
       headers: {
         'Accept': 'application/json',
         'User-Agent': DEFAULT_USER_AGENT,
@@ -190,9 +207,10 @@ const searxngProvider: SearchProvider = {
 const duckDuckGoProvider: SearchProvider = {
   id: 'duckduckgo-html',
   available: () => true,
-  async search(context) {
+  async search(context, signal) {
     const params = new URLSearchParams({ q: context.query });
     const response = await fetch(`${DUCKDUCKGO_HTML}?${params.toString()}`, {
+      signal,
       headers: {
         'Accept': 'text/html,application/xhtml+xml',
         'User-Agent': DEFAULT_USER_AGENT,
@@ -302,6 +320,74 @@ function maxResultsForMode(mode: SearchMode): number {
 function maxCombinedResultsForMode(mode: SearchMode): number {
   if (mode === 'deep-research') return 18;
   return mode === 'research' ? 12 : 6;
+}
+
+async function withTimeout<T>(
+  run: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await run(controller.signal);
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(timeoutMessage);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function searchCacheKey(query: string, clientKey: string | null | undefined, mode: SearchMode): string {
+  return [
+    mode,
+    clientKey ? 'byok' : 'hosted',
+    query.replace(/\s+/g, ' ').trim().toLowerCase(),
+  ].join(':');
+}
+
+function getCachedSearch(key: string): SearchResponse | null {
+  const cached = searchCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    searchCache.delete(key);
+    return null;
+  }
+  return cloneSearchResponse(cached.response);
+}
+
+function setCachedSearch(key: string, response: SearchResponse): void {
+  pruneSearchCache();
+  searchCache.set(key, {
+    expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
+    response: cloneSearchResponse(response),
+  });
+}
+
+function pruneSearchCache(): void {
+  const now = Date.now();
+  for (const [key, value] of searchCache.entries()) {
+    if (value.expiresAt <= now) searchCache.delete(key);
+  }
+
+  while (searchCache.size >= SEARCH_CACHE_MAX) {
+    const oldestKey = searchCache.keys().next().value;
+    if (!oldestKey) break;
+    searchCache.delete(oldestKey);
+  }
+}
+
+function cloneSearchResponse(response: SearchResponse): SearchResponse {
+  return {
+    ...response,
+    results: response.results.map((result) => ({ ...result })),
+    plannedQueries: response.plannedQueries ? [...response.plannedQueries] : undefined,
+    providers: response.providers ? [...response.providers] : undefined,
+    providerErrors: response.providerErrors ? [...response.providerErrors] : undefined,
+  };
 }
 
 function cleanText(value: string): string {

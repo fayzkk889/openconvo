@@ -3,7 +3,11 @@ import type { SearchResult } from '@/types/search';
 const MAX_FETCH_BYTES = 1_000_000;
 const MAX_EXTRACTED_CHARS = 5000;
 const FETCH_TIMEOUT_MS = 7000;
+const PAGE_CACHE_TTL_MS = 10 * 60 * 1000;
+const PAGE_CACHE_MAX = 120;
 const DEFAULT_USER_AGENT = 'OpenConvo/0.1 (+https://openconvo.vercel.app)';
+
+const pageCache = new Map<string, { expiresAt: number; content: string | null }>();
 
 export async function enrichSearchResults(
   results: SearchResult[],
@@ -31,6 +35,9 @@ export async function enrichSearchResults(
 export async function fetchReadablePage(url: string): Promise<string | null> {
   const safeUrl = parseSafeFetchUrl(url);
   if (!safeUrl) return null;
+  const cacheKey = canonicalPageCacheKey(safeUrl);
+  const cached = getCachedPage(cacheKey);
+  if (cached.hit) return cached.content;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -46,18 +53,29 @@ export async function fetchReadablePage(url: string): Promise<string | null> {
 
     if (!response.ok) return null;
     const contentType = response.headers.get('content-type') || '';
-    if (!isReadableContentType(contentType)) return null;
+    if (!isReadableContentType(contentType)) {
+      setCachedPage(cacheKey, null);
+      return null;
+    }
 
     const contentLength = Number(response.headers.get('content-length') || 0);
-    if (Number.isFinite(contentLength) && contentLength > MAX_FETCH_BYTES) return null;
+    if (Number.isFinite(contentLength) && contentLength > MAX_FETCH_BYTES) {
+      setCachedPage(cacheKey, null);
+      return null;
+    }
 
     const html = await readLimitedResponse(response);
-    if (!html.trim()) return null;
+    if (!html.trim()) {
+      setCachedPage(cacheKey, null);
+      return null;
+    }
 
     const text = contentType.includes('text/plain')
       ? html
       : extractReadableText(html);
-    return text ? text.slice(0, MAX_EXTRACTED_CHARS) : null;
+    const content = text ? text.slice(0, MAX_EXTRACTED_CHARS) : null;
+    setCachedPage(cacheKey, content);
+    return content;
   } catch {
     return null;
   } finally {
@@ -109,6 +127,46 @@ function isReadableContentType(contentType: string): boolean {
     contentType.includes('text/plain') ||
     contentType === ''
   );
+}
+
+function canonicalPageCacheKey(url: URL): string {
+  const parsed = new URL(url.href);
+  parsed.hash = '';
+  for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']) {
+    parsed.searchParams.delete(key);
+  }
+  return parsed.href.toLowerCase();
+}
+
+function getCachedPage(key: string): { hit: boolean; content: string | null } {
+  const cached = pageCache.get(key);
+  if (!cached) return { hit: false, content: null };
+  if (cached.expiresAt <= Date.now()) {
+    pageCache.delete(key);
+    return { hit: false, content: null };
+  }
+  return { hit: true, content: cached.content };
+}
+
+function setCachedPage(key: string, content: string | null): void {
+  prunePageCache();
+  pageCache.set(key, {
+    expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
+    content,
+  });
+}
+
+function prunePageCache(): void {
+  const now = Date.now();
+  for (const [key, value] of pageCache.entries()) {
+    if (value.expiresAt <= now) pageCache.delete(key);
+  }
+
+  while (pageCache.size >= PAGE_CACHE_MAX) {
+    const oldestKey = pageCache.keys().next().value;
+    if (!oldestKey) break;
+    pageCache.delete(oldestKey);
+  }
 }
 
 async function readLimitedResponse(response: Response): Promise<string> {

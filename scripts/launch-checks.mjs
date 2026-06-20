@@ -67,8 +67,10 @@ check('hosted search quota has response headers', /X-OpenConvo-Search-Limit/.tes
 check('search route exposes provider metadata', /X-OpenConvo-Search-Provider/.test(searchRoute));
 check('web search has provider fallback', /SearchProvider/.test(searchLib) && /tavilyProvider/.test(searchLib) && /duckDuckGoProvider/.test(searchLib));
 check('web search supports optional SearxNG', /searxngProvider/.test(searchLib) && /SEARXNG_URL/.test(searchLib));
+check('web search providers have timeouts and cache', /SEARCH_TIMEOUT_MS/.test(searchLib) && /withTimeout/.test(searchLib) && /searchCache/.test(searchLib));
 check('web search enriches results with page extraction', /enrichSearchResults/.test(searchRoute) && /fetchReadablePage/.test(webExtract));
 check('web extraction blocks local network fetches', /isBlockedHostname/.test(webExtract) && /169/.test(webExtract) && /192/.test(webExtract));
+check('web extraction caches fetched pages', /pageCache/.test(webExtract) && /PAGE_CACHE_TTL_MS/.test(webExtract));
 check('research mode plans multiple queries', /planResearchQueries/.test(searchRoute) && /searchWebMany/.test(searchLib) && /MAX_PLANNED_QUERIES/.test(researchPlanner));
 check('deep research mode expands query and source depth', /deep-research/.test(searchRoute) && /MAX_DEEP_PLANNED_QUERIES/.test(researchPlanner) && /maxCombinedResultsForMode/.test(searchLib));
 check('research trace is saved on messages', /researchTrace/.test(useChat) && /buildResearchTrace/.test(useChat));

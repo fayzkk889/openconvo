@@ -28,6 +28,15 @@ export interface ResearchTrace {
   openedCount: number;
 }
 
+export interface ResearchStatus {
+  phase: 'planning' | 'searching' | 'reading' | 'synthesizing';
+  mode: 'search' | 'research' | 'deep-research';
+  label: string;
+  plannedQueries?: number;
+  sourceCount?: number;
+  openedCount?: number;
+}
+
 export type TaskType = 'auto' | 'quick' | 'research' | 'deep-research' | 'file' | 'code' | 'writing';
 
 export interface Message {

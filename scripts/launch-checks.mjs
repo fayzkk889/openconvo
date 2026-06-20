@@ -73,9 +73,11 @@ check('research mode plans multiple queries', /planResearchQueries/.test(searchR
 check('deep research mode expands query and source depth', /deep-research/.test(searchRoute) && /MAX_DEEP_PLANNED_QUERIES/.test(researchPlanner) && /maxCombinedResultsForMode/.test(searchLib));
 check('research trace is saved on messages', /researchTrace/.test(useChat) && /buildResearchTrace/.test(useChat));
 check('research trace renders in source panel', /Research trace/.test(messageComponent) && /plannedQueries/.test(messageComponent));
+check('research progress is visible before synthesis', /researchStatus/.test(useChat) && /ResearchProgress/.test(read('src/components/chat-area.tsx')));
 check('search results are quality ranked', /rankSearchResults/.test(searchLib) && /sourceScore/.test(sourceQuality));
 check('source quality is exposed to prompts and UI', /Quality:/.test(prompts) && /sourceLabel/.test(messageComponent));
 check('research reports are extracted as artifacts', /extractResearchReportArtifact/.test(artifactsLib) && /Research Evidence/.test(artifactsLib));
+check('artifacts can be exported directly', /handleDownload/.test(read('src/components/artifact-panel.tsx')) && /artifactExtension/.test(read('src/components/artifact-panel.tsx')));
 check('database migration repairs artifact indexes', /artifactStore\.indexNames\.contains\('by-project'\)/.test(db));
 check('imports repair unsafe model ids', /resolveSafeModelId/.test(exportLib));
 check('imports cap large text fields', /MAX_MESSAGE_CHARS/.test(exportLib) && /MAX_ARTIFACT_CHARS/.test(exportLib));

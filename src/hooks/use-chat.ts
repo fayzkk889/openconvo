@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
-import { Message, Attachment, ResearchTrace } from '@/types/chat';
+import { Message, Attachment, ResearchTrace, ResearchStatus } from '@/types/chat';
 import type { TaskType } from '@/types/chat';
 import { AIModel } from '@/types/models';
 import { SearchResponse } from '@/types/search';
@@ -35,6 +35,7 @@ export function useChat(
 ) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [researchStatus, setResearchStatus] = useState<ResearchStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -47,6 +48,7 @@ export function useChat(
     }
     return () => {
       abortRef.current?.abort();
+      setResearchStatus(null);
     };
   }, [conversationId]);
 
@@ -88,6 +90,7 @@ export function useChat(
       if (!conversationId || !content.trim()) return;
 
       setError(null);
+      setResearchStatus(null);
       const activeModel = modelOverride || model;
 
       // Save user message
@@ -109,6 +112,12 @@ export function useChat(
       const searchMode = taskType === 'deep-research' ? 'deep-research' : shouldUseResearch ? 'research' : 'search';
       if (shouldUseSearch) {
         try {
+          const initialPhase = shouldUseResearch ? 'planning' : 'searching';
+          setResearchStatus({
+            phase: initialPhase,
+            mode: searchMode,
+            label: researchStatusLabel(initialPhase, searchMode),
+          });
           const searchRes = await fetch('/api/search', {
             method: 'POST',
             headers: {
@@ -119,6 +128,14 @@ export function useChat(
           });
           if (searchRes.ok) {
             searchResults = await searchRes.json();
+            setResearchStatus({
+              phase: 'synthesizing',
+              mode: searchMode,
+              label: researchStatusLabel('synthesizing', searchMode),
+              plannedQueries: searchResults?.plannedQueries?.length,
+              sourceCount: searchResults?.results?.length,
+              openedCount: searchResults?.results?.filter((result) => result.extracted).length,
+            });
           } else {
             const err = await searchRes.json().catch(() => ({}));
             setError(err.error || 'Search failed; continuing without web results');
@@ -175,6 +192,7 @@ export function useChat(
           };
 
           setMessages((prev) => [...prev, placeholderMessage]);
+          setResearchStatus(null);
 
           try {
             const requestStartedAt = Date.now();
@@ -364,6 +382,7 @@ export function useChat(
         }
       } finally {
         setIsStreaming(false);
+        setResearchStatus(null);
         abortRef.current = null;
       }
     },
@@ -373,6 +392,7 @@ export function useChat(
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
     setIsStreaming(false);
+    setResearchStatus(null);
   }, []);
 
   const regenerateMessage = useCallback(
@@ -397,6 +417,7 @@ export function useChat(
       setMessages((prev) => prev.slice(0, msgIndex));
 
       setError(null);
+      setResearchStatus(null);
 
       const assistantId = generateId();
       const placeholderMessage: Message = {
@@ -578,6 +599,7 @@ export function useChat(
         );
       } finally {
         setIsStreaming(false);
+        setResearchStatus(null);
         abortRef.current = null;
       }
     },
@@ -613,6 +635,7 @@ export function useChat(
   return {
     messages,
     isStreaming,
+    researchStatus,
     error,
     sendMessage,
     stopStreaming,
@@ -633,6 +656,22 @@ function buildResearchTrace(searchResults: SearchResponse | null): ResearchTrace
     sourceCount: searchResults.results.length,
     openedCount: searchResults.results.filter((result) => result.extracted).length,
   };
+}
+
+function researchStatusLabel(phase: ResearchStatus['phase'], mode: ResearchStatus['mode']): string {
+  const depth = mode === 'deep-research' ? 'deep research' : mode === 'research' ? 'research' : 'web search';
+  switch (phase) {
+    case 'planning':
+      return `Planning ${depth} queries`;
+    case 'searching':
+      return `Searching the web`;
+    case 'reading':
+      return `Opening sources`;
+    case 'synthesizing':
+      return `Preparing answer from sources`;
+    default:
+      return `Working`;
+  }
 }
 
 class ChatRequestError extends Error {

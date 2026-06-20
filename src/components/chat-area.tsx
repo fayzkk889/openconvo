@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useEffect, useState } from 'react';
-import { Message, Attachment, Conversation, TaskType } from '@/types/chat';
+import { Message, Attachment, Conversation, TaskType, ResearchStatus } from '@/types/chat';
 import { AIModel } from '@/types/models';
 import type { ModelReliability } from '@/types/models';
 import { PromptSnippet } from '@/types/settings';
@@ -10,7 +10,7 @@ import { Composer } from './composer';
 import { EmptyState } from './empty-state';
 import { ArtifactPanel } from './artifact-panel';
 import { Button } from './ui/button';
-import { ChevronDown, FileText, Gauge } from 'lucide-react';
+import { ChevronDown, FileText, Gauge, Search } from 'lucide-react';
 import { useArtifacts } from '@/hooks/use-artifacts';
 import { estimateContextUsage, formatTokenCount } from '@/lib/context-usage';
 import type { WorkflowStarter, WorkflowStarterDraft } from '@/lib/workflow-starters';
@@ -22,6 +22,7 @@ interface ChatAreaProps {
   conversation: Conversation | null;
   messages: Message[];
   isStreaming: boolean;
+  researchStatus: ResearchStatus | null;
   error: string | null;
   onSendMessage: (args: { content: string; attachments?: Attachment[]; searchEnabled?: boolean; researchEnabled?: boolean; agentEnabled?: boolean; taskType?: TaskType; compareEnabled?: boolean }) => void;
   onStopStreaming: () => void;
@@ -58,6 +59,7 @@ export function ChatArea({
   conversation,
   messages,
   isStreaming,
+  researchStatus,
   error,
   onSendMessage,
   onStopStreaming,
@@ -208,6 +210,9 @@ export function ChatArea({
 
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[var(--color-bg-primary)] via-[var(--color-bg-primary)] to-transparent px-3 pb-4 pt-14 md:px-6 md:pb-6">
         <div className="mx-auto max-w-4xl">
+          {researchStatus && (
+            <ResearchProgress status={researchStatus} />
+          )}
           {error && !messages[messages.length - 1]?.isError && (
             <div className="mb-4 text-sm text-[var(--color-danger)] bg-[var(--color-danger)]/10 p-3 rounded-lg border border-[var(--color-danger)]/20 text-center animate-fade-in">
               {error}
@@ -281,6 +286,33 @@ export function ChatArea({
         onUpdate={updateArtifact}
         onDelete={deleteArtifact}
       />
+    </div>
+  );
+}
+
+function ResearchProgress({ status }: { status: ResearchStatus }) {
+  const stats = [
+    typeof status.plannedQueries === 'number' ? `${status.plannedQueries} queries` : null,
+    typeof status.sourceCount === 'number' ? `${status.sourceCount} sources` : null,
+    typeof status.openedCount === 'number' ? `${status.openedCount} opened` : null,
+  ].filter(Boolean);
+
+  return (
+    <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-xs text-[var(--color-text-secondary)] shadow-sm">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)]">
+          <Search className="h-3.5 w-3.5 animate-pulse" />
+        </span>
+        <div className="min-w-0">
+          <p className="truncate font-semibold text-[var(--color-text-primary)]">{status.label}</p>
+          {stats.length > 0 && (
+            <p className="truncate text-[11px] text-[var(--color-text-tertiary)]">{stats.join(' · ')}</p>
+          )}
+        </div>
+      </div>
+      <span className="hidden shrink-0 rounded-full border border-[var(--color-border)] px-2 py-1 text-[10px] font-semibold text-[var(--color-text-tertiary)] sm:inline-flex">
+        {status.mode === 'deep-research' ? 'Deep' : status.mode === 'research' ? 'Research' : 'Search'}
+      </span>
     </div>
   );
 }

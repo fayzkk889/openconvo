@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, Copy, FileText, Save, Trash2, X } from 'lucide-react';
+import { Check, Copy, Download, FileText, Save, Trash2, X } from 'lucide-react';
 import { Artifact } from '@/types/chat';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -60,6 +60,18 @@ export function ArtifactPanel({ artifacts, open, onClose, onUpdate, onDelete }: 
     });
   };
 
+  const handleDownload = () => {
+    const blob = new Blob([content], { type: artifactMimeType(language) });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${slugify(title || selected.title)}.${artifactExtension(language)}`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <aside className="absolute bottom-0 right-0 top-0 z-20 flex w-full flex-col border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)] shadow-2xl shadow-black/30 sm:w-[420px]">
       <div className="flex h-14 items-center justify-between border-b border-[var(--color-border)] px-4">
@@ -94,10 +106,16 @@ export function ArtifactPanel({ artifacts, open, onClose, onUpdate, onDelete }: 
         </div>
 
         <div className="flex items-center justify-between gap-2">
-          <Button variant="ghost" size="sm" onClick={handleCopy}>
-            {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-            {copied ? 'Copied' : 'Copy'}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={handleCopy}>
+              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copied ? 'Copied' : 'Copy'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleDownload}>
+              <Download className="h-4 w-4" />
+              Export
+            </Button>
+          </div>
           <div className="flex items-center gap-2">
             <Button
               variant="ghost"
@@ -124,4 +142,34 @@ export function ArtifactPanel({ artifacts, open, onClose, onUpdate, onDelete }: 
       />
     </aside>
   );
+}
+
+function artifactExtension(language: string): string {
+  const normalized = language.trim().toLowerCase();
+  if (normalized === 'markdown' || normalized === 'md') return 'md';
+  if (normalized === 'javascript') return 'js';
+  if (normalized === 'typescript') return 'ts';
+  if (normalized === 'python') return 'py';
+  if (normalized === 'json') return 'json';
+  if (normalized === 'html') return 'html';
+  if (normalized === 'css') return 'css';
+  return 'txt';
+}
+
+function artifactMimeType(language: string): string {
+  const extension = artifactExtension(language);
+  if (extension === 'md') return 'text/markdown;charset=utf-8';
+  if (extension === 'json') return 'application/json;charset=utf-8';
+  if (extension === 'html') return 'text/html;charset=utf-8';
+  if (extension === 'css') return 'text/css;charset=utf-8';
+  return 'text/plain;charset=utf-8';
+}
+
+function slugify(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  return slug || 'openconvo-artifact';
 }

@@ -88,6 +88,7 @@ export function AppShell() {
   const {
     messages,
     isStreaming,
+    researchStatus,
     error,
     sendMessage,
     stopStreaming,
@@ -352,6 +353,7 @@ export function AppShell() {
             conversation={activeConversation}
             messages={messages}
             isStreaming={isStreaming}
+            researchStatus={researchStatus}
             error={error}
             onSendMessage={(args) => {
               const titleConversationId = activeId;

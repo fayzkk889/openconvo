@@ -87,6 +87,7 @@ check('web extraction caches fetched pages', /pageCache/.test(webExtract) && /PA
 check('search and extraction strip tracking params', /TRACKING_QUERY_PARAMS/.test(searchLib) && /TRACKING_QUERY_PARAMS/.test(webExtract) && /fbclid/.test(searchLib) && /msclkid/.test(webExtract));
 check('search dedupes repeated titles from the same host', /seenTitleHosts/.test(searchLib) && /normalizeDedupeTitle/.test(searchLib));
 check('research mode plans multiple queries', /planResearchQueries/.test(searchRoute) && /searchWebMany/.test(searchLib) && /MAX_PLANNED_QUERIES\s*=\s*8/.test(researchPlanner));
+check('research planner preserves raw query as first candidate', /const candidates = \[\s*originalQuery,/.test(researchPlanner));
 check('research mode uses model planner before heuristic fallback', /generateResearchPlan/.test(searchRoute) && /planner:\s*'model'/.test(searchRoute) && /planner:\s*'heuristic'/.test(searchRoute));
 check('research planning can use initial search context', /planningContext/.test(searchRoute) && /formatPlanningContext/.test(openrouter));
 check('auto mode has broad web research triggers', /needsWebResearch/.test(tasks) && /latest\|current/.test(tasks) && /looksLikeExternalDecision/.test(tasks));
@@ -97,6 +98,10 @@ check('research planner uses generic query analysis', /analyzeResearchQuery/.tes
 check('research planner avoids topic-specific subject hardcoding', !/OpenAI|ChatGPT|Claude|Anthropic|Continental|GT 650|Supabase|Firebase/.test(researchPlanner));
 check('research planner decomposes by intent and subject', /subjectQueries/.test(researchPlanner) && /intentQueries/.test(researchPlanner) && /STOP_WORDS/.test(researchPlanner));
 check('research planner handles comparisons without topic dictionaries', /extractComparisonSubjects/.test(researchPlanner) && /stripAudienceContext/.test(researchPlanner));
+check('research planner avoids long bare-or comparison splits', /splitShortOrComparison/.test(researchPlanner) && /tokenCounts\.every/.test(researchPlanner));
+check('research planner does not treat all-caps prose as named entities', /mostlyUppercaseProse/.test(researchPlanner) && /matches = mostlyUppercaseProse\(normalized\)/.test(researchPlanner));
+check('research planner extracts generic AI model subject phrases', /extractAiModelSubjects/.test(researchPlanner) && /ai\\s\+models\?/.test(researchPlanner));
+check('research planner filters dangling model fragments', /!\s*\/\^models\?\\s\+\\w\+/.test(researchPlanner));
 check('research planner strips generic question frames', /stripQuestionFrame/.test(researchPlanner) && /which\|what/.test(researchPlanner) && /should\|can\|could/.test(researchPlanner));
 check('research planner extracts latest-development topics', /extractKnowledgeTopic/.test(researchPlanner) && /knowledgeNewsQueries/.test(researchPlanner));
 check('research planner handles purchase constraints generically', /buildConstraintSearchQuery/.test(researchPlanner) && /extractPurchaseSubjects/.test(researchPlanner) && /extractBudgetConstraint/.test(researchPlanner));

@@ -28,6 +28,7 @@ const MAX_SUBJECTS = 5;
 
 const STOP_WORDS = new Set([
   'a',
+  'about',
   'an',
   'and',
   'are',
@@ -71,6 +72,7 @@ const STOP_WORDS = new Set([
   'is',
   'it',
   'latest',
+  'lot',
   'me',
   'more',
   'new',
@@ -87,11 +89,13 @@ const STOP_WORDS = new Set([
   'please',
   'recent',
   'recommended',
+  'really',
   'right',
   's',
   'should',
   'show',
   'some',
+  'studying',
   'tell',
   'than',
   'that',
@@ -102,12 +106,14 @@ const STOP_WORDS = new Set([
   'to',
   'today',
   'under',
+  'umm',
   'up',
   'us',
   'use',
   'versus',
   'vs',
   'want',
+  'wanna',
   'worth',
   'what',
   'whats',
@@ -190,10 +196,10 @@ export function planResearchQueries(query: string, options?: { deep?: boolean })
   const originalQuery = normalizeQuery(query);
   const analysis = analyzeResearchQuery(originalQuery);
   const candidates = [
+    originalQuery,
     ...priorityIntentQueries(analysis),
     ...subjectQueries(analysis),
     ...intentQueries(analysis),
-    originalQuery,
     `${originalQuery} sources`,
     `${originalQuery} analysis`,
     ...(options?.deep ? deepResearchQueries(analysis) : []),
@@ -392,6 +398,7 @@ function extractCandidateSubjects(query: string): string[] {
   const knowledgeTopic = extractKnowledgeTopic(query);
   const strippedQuery = stripQuestionFrame(query);
   const namedSubjects = extractNamedSubjects(strippedQuery);
+  const aiModelSubjects = extractAiModelSubjects(query);
   const listedThingSubjects = extractListedThingSubjects(query);
   const productCategorySubjects = extractProductCategorySubjects(query);
   const purchaseSubjects = extractPurchaseSubjects(query);
@@ -405,6 +412,7 @@ function extractCandidateSubjects(query: string): string[] {
     ...quoted,
     knowledgeTopic,
     ...namedSubjects,
+    ...aiModelSubjects,
     ...listedThingSubjects,
     ...productCategorySubjects,
     ...purchaseSubjects,
@@ -414,15 +422,18 @@ function extractCandidateSubjects(query: string): string[] {
   ])
     .map(normalizeSubject)
     .filter((subject) => subject.length >= 2)
+    .filter((subject) => !/^models?\s+\w+/i.test(subject))
     .filter((subject) => subject.split(/\s+/).length <= 8)
     .slice(0, MAX_SUBJECTS);
 }
 
 function extractNamedSubjects(query: string): string[] {
   const normalized = normalizeSubject(query);
-  const matches = Array.from(normalized.matchAll(
-    /\b(?:[A-Z]{2,}(?:\s+(?:\d{2,4}|[A-Z][A-Za-z0-9-]+))*|[A-Z][A-Za-z0-9-]+(?:\s+(?:[A-Z][A-Za-z0-9-]+|\d{2,4})){1,5})\b/g
-  )).map((match) => cleanSubject(match[0] || ''));
+  const matches = mostlyUppercaseProse(normalized)
+    ? []
+    : Array.from(normalized.matchAll(
+      /\b(?:[A-Z]{2,}(?:\s+(?:\d{2,4}|[A-Z][A-Za-z0-9-]+))*|[A-Z][A-Za-z0-9-]+(?:\s+(?:[A-Z][A-Za-z0-9-]+|\d{2,4})){1,5})\b/g
+    )).map((match) => cleanSubject(match[0] || ''));
 
   const acronymWithYear = Array.from(normalized.matchAll(/\b([A-Z]{2,})\s*(20\d{2}|19\d{2})\b/g))
     .map((match) => cleanSubject(`${match[1]} ${match[2]}`));
@@ -435,6 +446,24 @@ function extractNamedSubjects(query: string): string[] {
     .filter((subject) => subject.length >= 2)
     .filter((subject) => subject.split(/\s+/).length <= 6)
     .slice(0, MAX_SUBJECTS);
+}
+
+function extractAiModelSubjects(query: string): string[] {
+  const normalized = normalizeSubject(query);
+  return Array.from(normalized.matchAll(/\b([a-z][a-z\s-]{0,50}?\bai\s+models?)\b/gi))
+    .map((match) => {
+      const tokens = cleanSubject(match[1] || '').split(/\s+/).filter(Boolean);
+      return tokens.slice(-4).join(' ');
+    })
+    .filter(Boolean);
+}
+
+function mostlyUppercaseProse(value: string): boolean {
+  const letters = value.match(/[A-Za-z]/g) || [];
+  if (letters.length < 12) return false;
+  const uppercase = value.match(/[A-Z]/g) || [];
+  const lowercase = value.match(/[a-z]/g) || [];
+  return uppercase.length / letters.length > 0.7 && lowercase.length / letters.length < 0.2;
 }
 
 function extractKnowledgeTopic(query: string): string {
@@ -460,9 +489,10 @@ function extractPurchaseSubjects(query: string): string[] {
 
 function extractProductCategorySubjects(query: string): string[] {
   const normalized = normalizeSubject(query);
-  const productWords = '(?:phones?|smartphones?|laptops?|mobiles?|bikes?|motorcycles?|cars?|tablets?|earbuds?|headphones?|monitors?|keyboards?|mice|cameras?)';
+  const productWords = '(?:models?|phones?|smartphones?|laptops?|mobiles?|bikes?|motorcycles?|cars?|tablets?|earbuds?|headphones?|monitors?|keyboards?|mice|cameras?)';
   return Array.from(normalized.matchAll(new RegExp(`\\b((?:[a-z0-9]+\\s+){0,3}${productWords})\\b`, 'gi')))
     .map((match) => cleanSubject(match[1] || ''))
+    .filter((subject) => !/^models?\s+\w+/i.test(subject))
     .filter(Boolean);
 }
 
@@ -563,7 +593,11 @@ function cleanupAttributeText(value: string): string {
 }
 
 function extractComparisonSubjects(query: string): string[] {
-  const parts = stripQuestionFrame(query).split(/\b(?:vs\.?|versus|compared with|compared to|or)\b/i);
+  const stripped = stripQuestionFrame(query);
+  const explicitComparison = /\b(?:vs\.?|versus|compared with|compared to)\b/i.test(stripped);
+  const parts = explicitComparison
+    ? stripped.split(/\b(?:vs\.?|versus|compared with|compared to)\b/i)
+    : splitShortOrComparison(stripped);
   if (parts.length < 2) return [];
 
   return parts
@@ -577,6 +611,14 @@ function extractComparisonSubjects(query: string): string[] {
     })
     .map(trimLooseConnectors)
     .filter(Boolean);
+}
+
+function splitShortOrComparison(query: string): string[] {
+  const parts = query.split(/\bor\b/i);
+  if (parts.length !== 2) return [query];
+  const cleaned = parts.map((part) => cleanSubject(part));
+  const tokenCounts = cleaned.map((part) => part.split(/\s+/).filter(Boolean).length);
+  return tokenCounts.every((count) => count > 0 && count <= 4) ? parts : [query];
 }
 
 function cleanSubject(value: string): string {

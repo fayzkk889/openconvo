@@ -92,6 +92,8 @@ check('research mode uses model planner before heuristic fallback', /generateRes
 check('research planning can use initial search context', /planningContext/.test(searchRoute) && /formatPlanningContext/.test(openrouter));
 check('auto mode has broad web research triggers', /needsWebResearch/.test(tasks) && /latest\|current/.test(tasks) && /looksLikeExternalDecision/.test(tasks));
 check('auto mode keeps casual greetings out of research', /isCasualGreeting/.test(tasks) && /return 'quick'/.test(tasks));
+check('auto mode strips leading greetings before routing/search', /stripLeadingGreeting/.test(tasks) && /stripLeadingGreeting\(content\)/.test(useChat) && /stripLeadingGreeting\(query\)/.test(searchRoute));
+check('hidden search toggles do not force auto research', !/researchEnabled \|\| searchEnabled\) return 'research'/.test(tasks) && /const shouldUseSearch = !isQuickTask && isResearchTask/.test(useChat));
 check('auto mode routes social trends to research', /trending\|trends\|viral/.test(tasks) && /twitter\|x\\\.com\|reddit/.test(tasks));
 check('auto mode routes budget and spec lists to research', /budget\|under\|below\|within/.test(tasks) && /cc\|bhp\|nm\|kmpl/.test(tasks) && /give me the list/.test(tasks));
 check('research planner uses generic query analysis', /analyzeResearchQuery/.test(researchPlanner) && /inferResearchIntent/.test(researchPlanner) && /extractCandidateSubjects/.test(researchPlanner));
@@ -143,7 +145,7 @@ check('markdown tables remain contained', /overflow-x: auto/.test(globals) && /v
 check('chat stream stalls are bounded and recoverable', /CHAT_STREAM_IDLE_TIMEOUT_MS/.test(chatRoute) && /readStreamChunkWithTimeout/.test(chatRoute) && /did not stream a response in time/.test(chatRoute));
 check('client search and title requests have timeouts', /SEARCH_REQUEST_TIMEOUT_MS/.test(useChat) && /TITLE_REQUEST_TIMEOUT_MS/.test(useChat) && /fetchWithTimeout/.test(useChat));
 check('research retries progressively shrink context', /RESEARCH_RETRY_SOURCE_LIMITS/.test(useChat) && /compactSearchResultsForAttempt/.test(useChat) && /MAX_SOURCE_CONTENT_CHARS/.test(prompts) && /MAX_SEARCH_CONTENT_CHARS/.test(chatRoute));
-check('quick tasks bypass external search even when toggles are on', /isQuickTask/.test(useChat) && /!isQuickTask && \(searchEnabled \|\| researchEnabled \|\| isResearchTask\)/.test(useChat));
+check('quick tasks bypass external search', /isQuickTask/.test(useChat) && /const shouldUseSearch = !isQuickTask && isResearchTask/.test(useChat));
 check('casual greetings use a local reply without model search', /isCasualGreeting\(content\)/.test(useChat) && /Hey! How can I help\?/.test(useChat) && /return;/.test(useChat));
 check('local conversation titles are summarized, not raw first prompts', /buildConversationTitle/.test(titleLib) && /buildComparisonTitle/.test(titleLib) && /buildPurchaseTitle/.test(titleLib) && /buildFeatureTitle/.test(titleLib) && /buildConversationTitle/.test(useChat) && /buildConversationTitle/.test(openrouter) && !/function buildLocalTitle/.test(useChat));
 check('research reports are extracted as artifacts', /extractResearchReportArtifact/.test(artifactsLib) && /Research Evidence/.test(artifactsLib));

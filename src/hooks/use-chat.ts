@@ -10,7 +10,7 @@ import { generateId } from '@/lib/utils';
 import { buildResearchFallbackAnswer } from '@/lib/research-fallback';
 import { ensureResearchCitations } from '@/lib/research-citations';
 import { buildConversationTitle } from '@/lib/title';
-import { isCasualGreeting } from '@/lib/tasks';
+import { isCasualGreeting, stripLeadingGreeting } from '@/lib/tasks';
 
 const STREAM_FLUSH_MS = 18;
 const STREAM_FINISH_BUDGET_MS = 900;
@@ -74,8 +74,6 @@ export function useChat(
     async ({
       content,
       attachments,
-      searchEnabled,
-      researchEnabled,
       agentEnabled,
       taskType,
       modelOverride,
@@ -133,8 +131,8 @@ export function useChat(
       let searchResults: SearchResponse | null = null;
       const isResearchTask = taskType === 'research' || taskType === 'deep-research';
       const isQuickTask = taskType === 'quick';
-      const shouldUseSearch = !isQuickTask && (searchEnabled || researchEnabled || isResearchTask);
-      const shouldUseResearch = !isQuickTask && (researchEnabled || isResearchTask);
+      const shouldUseSearch = !isQuickTask && isResearchTask;
+      const shouldUseResearch = !isQuickTask && isResearchTask;
       const searchMode = taskType === 'deep-research' ? 'deep-research' : shouldUseResearch ? 'research' : 'search';
       if (shouldUseSearch) {
         try {
@@ -151,7 +149,7 @@ export function useChat(
               ...(tavilyApiKey ? { 'x-tavily-key': tavilyApiKey } : {}),
               ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
             },
-            body: JSON.stringify({ query: content.trim(), mode: searchMode, model: activeModel }),
+            body: JSON.stringify({ query: stripLeadingGreeting(content), mode: searchMode, model: activeModel }),
           }, SEARCH_REQUEST_TIMEOUT_MS);
           if (searchRes.ok) {
             searchResults = await searchRes.json();

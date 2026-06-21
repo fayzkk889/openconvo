@@ -3,6 +3,7 @@ import { searchWeb, searchWebMany } from '@/lib/search';
 import { enrichSearchResults } from '@/lib/web-extract';
 import { planResearchQueries } from '@/lib/research-planner';
 import { generateResearchPlan } from '@/lib/openrouter';
+import { stripLeadingGreeting } from '@/lib/tasks';
 
 export const maxDuration = 60;
 
@@ -30,7 +31,7 @@ export async function POST(request: NextRequest) {
     if (!query || typeof query !== 'string') {
       return Response.json({ error: 'Query is required' }, { status: 400 });
     }
-    const trimmedQuery = query.trim();
+    const trimmedQuery = stripLeadingGreeting(query);
     if (!trimmedQuery) {
       return Response.json({ error: 'Query is required' }, { status: 400 });
     }

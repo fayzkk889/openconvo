@@ -32,6 +32,7 @@ const STOP_WORDS = new Set([
   'an',
   'and',
   'are',
+  'around',
   'as',
   'at',
   'be',
@@ -193,7 +194,7 @@ const INTENT_WORDS = new Set([
 ]);
 
 export function planResearchQueries(query: string, options?: { deep?: boolean }): ResearchPlan {
-  const originalQuery = normalizeQuery(query);
+  const originalQuery = normalizeSearchQuery(query);
   const analysis = analyzeResearchQuery(originalQuery);
   const candidates = [
     originalQuery,
@@ -297,8 +298,17 @@ function priorityIntentQueries(analysis: ResearchAnalysis): string[] {
 
 function knowledgeNewsQueries(analysis: ResearchAnalysis): string[] {
   if (!analysis.intent.freshness) return [];
-  const topic = extractKnowledgeTopic(analysis.originalQuery) || analysis.subjects[0];
+  const topic = extractNewsTopic(analysis.originalQuery) || extractKnowledgeTopic(analysis.originalQuery) || analysis.subjects[0];
   if (!topic) return [];
+
+  if (/\bnews\b/i.test(topic)) {
+    return [
+      `${topic} today`,
+      `${topic} latest headlines`,
+      `${topic} top stories`,
+      `${topic} breaking news`,
+    ];
+  }
 
   return [
     `${topic} latest news`,
@@ -306,6 +316,21 @@ function knowledgeNewsQueries(analysis: ResearchAnalysis): string[] {
     `${topic} recent breakthroughs research`,
     `${topic} official announcements`,
   ];
+}
+
+function extractNewsTopic(query: string): string {
+  const normalized = normalizeSubject(query);
+  if (!/\b(?:news|headlines|updates|current events)\b/i.test(normalized)) return '';
+
+  if (/\b(?:around the world|worldwide|global|international|world)\b/i.test(normalized)) {
+    return 'world news';
+  }
+
+  const scopedNews = normalized.match(/\b(?:latest|recent|current|today'?s?)?\s*(?:news|headlines|updates)\s+(?:in|from|for|about|on)\s+([^?.,;:]{2,80})/i);
+  const scopedTopic = cleanSubject(scopedNews?.[1] || '');
+  if (scopedTopic) return `${scopedTopic} news`;
+
+  return '';
 }
 
 function socialTrendQueries(analysis: ResearchAnalysis): string[] {
@@ -691,6 +716,14 @@ function trimLooseConnectors(value: string): string {
 
 function normalizeQuery(query: string): string {
   return query.replace(/\s+/g, ' ').trim().slice(0, 500);
+}
+
+function normalizeSearchQuery(query: string): string {
+  const framed = stripQuestionFrame(query)
+    .replace(/^(?:some|please)\s+/i, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalizeQuery(framed || query);
 }
 
 function dedupeQueries(queries: string[]): string[] {

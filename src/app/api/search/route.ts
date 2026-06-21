@@ -55,8 +55,14 @@ export async function POST(request: NextRequest) {
 
     return await withTimeout(async () => {
       const searchMode = mode === 'deep-research' ? 'deep-research' : mode === 'research' ? 'research' : 'search';
+      const heuristicPlan = searchMode !== 'search'
+        ? planResearchQueries(trimmedQuery, { deep: searchMode === 'deep-research' })
+        : null;
+      const initialSearchQuery = heuristicPlan
+        ? bestInitialSearchQuery(heuristicPlan.queries, trimmedQuery)
+        : trimmedQuery;
       const initialSearch = searchMode !== 'search'
-        ? await searchWeb(trimmedQuery, key, 'search')
+        ? await searchWeb(initialSearchQuery, key, 'search')
         : null;
       const researchPlan = searchMode !== 'search'
         ? await buildResearchPlan(trimmedQuery, {
@@ -64,6 +70,7 @@ export async function POST(request: NextRequest) {
           apiKey: openrouterKey,
           model: typeof model === 'string' ? model : undefined,
           planningContext: initialSearch?.results,
+          fallbackPlan: heuristicPlan || undefined,
         })
         : null;
       const results = researchPlan
@@ -116,6 +123,7 @@ async function buildResearchPlan(
     apiKey?: string | null;
     model?: string;
     planningContext?: Array<{ title: string; url: string; snippet?: string }>;
+    fallbackPlan?: { queries: string[] };
   }
 ): Promise<{ queries: string[]; entities?: string[]; planner: 'model' | 'heuristic' }> {
   const modelPlan = await generateResearchPlan(query, {
@@ -126,17 +134,44 @@ async function buildResearchPlan(
     planningContext: options.planningContext,
   });
   if (modelPlan?.queries.length) {
+    const maxQueries = options.deep ? 7 : 5;
+    const mergedQueries = dedupeSearchQueries([
+      ...(options.fallbackPlan?.queries || []),
+      ...modelPlan.queries,
+    ]).slice(0, maxQueries);
     return {
-      queries: modelPlan.queries,
+      queries: mergedQueries.length ? mergedQueries : modelPlan.queries,
       entities: modelPlan.entities,
       planner: 'model',
     };
   }
 
   return {
-    ...planResearchQueries(query, { deep: options.deep }),
+    ...(options.fallbackPlan || planResearchQueries(query, { deep: options.deep })),
     planner: 'heuristic',
   };
+}
+
+function bestInitialSearchQuery(queries: string[], originalQuery: string): string {
+  return queries.find((query) => query !== originalQuery && !isConversationalSearchQuery(query)) || originalQuery;
+}
+
+function dedupeSearchQueries(queries: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const query of queries) {
+    const normalized = query.replace(/\s+/g, ' ').trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function isConversationalSearchQuery(query: string): boolean {
+  return /\b(?:can u|can you|tell me|give me|please|some)\b/i.test(query);
 }
 
 async function withTimeout<T>(run: () => Promise<T>, timeoutMs: number, message: string): Promise<T> {

@@ -90,6 +90,8 @@ check('research mode plans multiple queries', /planResearchQueries/.test(searchR
 check('research planner preserves raw query as first candidate', /const candidates = \[\s*originalQuery,/.test(researchPlanner));
 check('research mode uses model planner before heuristic fallback', /generateResearchPlan/.test(searchRoute) && /planner:\s*'model'/.test(searchRoute) && /planner:\s*'heuristic'/.test(searchRoute));
 check('research planning can use initial search context', /planningContext/.test(searchRoute) && /formatPlanningContext/.test(openrouter));
+check('research initial search uses focused heuristic query', /bestInitialSearchQuery/.test(searchRoute) && /initialSearchQuery/.test(searchRoute));
+check('model planner cannot erase deterministic fallback queries', /fallbackPlan/.test(searchRoute) && /dedupeSearchQueries/.test(searchRoute) && /\.\.\.\(options\.fallbackPlan\?\.queries/.test(searchRoute));
 check('auto mode has broad web research triggers', /needsWebResearch/.test(tasks) && /latest\|current/.test(tasks) && /looksLikeExternalDecision/.test(tasks));
 check('auto mode keeps casual greetings out of research', /isCasualGreeting/.test(tasks) && /return 'quick'/.test(tasks));
 check('auto mode strips leading greetings before routing/search', /stripLeadingGreeting/.test(tasks) && /stripLeadingGreeting\(content\)/.test(useChat) && /stripLeadingGreeting\(query\)/.test(searchRoute));
@@ -106,6 +108,7 @@ check('research planner extracts generic AI model subject phrases', /extractAiMo
 check('research planner filters dangling model fragments', /!\s*\/\^models\?\\s\+\\w\+/.test(researchPlanner));
 check('research planner strips generic question frames', /stripQuestionFrame/.test(researchPlanner) && /which\|what/.test(researchPlanner) && /should\|can\|could/.test(researchPlanner));
 check('research planner extracts latest-development topics', /extractKnowledgeTopic/.test(researchPlanner) && /knowledgeNewsQueries/.test(researchPlanner));
+check('research planner handles generic world news queries', /extractNewsTopic/.test(researchPlanner) && /world news/.test(researchPlanner) && /latest headlines/.test(researchPlanner));
 check('research planner handles purchase constraints generically', /buildConstraintSearchQuery/.test(researchPlanner) && /extractPurchaseSubjects/.test(researchPlanner) && /extractBudgetConstraint/.test(researchPlanner));
 check('research planner gates constraint queries behind purchase intent', /if \(!analysis\.intent\.purchase\) return \[\]/.test(researchPlanner));
 check('research planner derives market scope from currency', /extractMarketScope/.test(researchPlanner) && /inr/.test(researchPlanner) && /India/.test(researchPlanner));

@@ -167,6 +167,14 @@ export function inferTaskType({
     return 'quick';
   }
 
+  // Conceptual explanations without code implementation intent route to quick
+  const isConceptualExplanation = /^(?:explain|describe|what\s+is|what\s+are|how\s+does|how\s+do|overview\s+of)\b/i.test(text.trim()) &&
+    !/\b(?:write|code|implement|fix|debug|refactor|script|function|component|query|syntax|schema|migration|error|stack\s+trace)\b/i.test(text);
+
+  if (isConceptualExplanation) {
+    return 'quick';
+  }
+
   if (/\b(code|bug|debug|typescript|javascript|react|next\.?js|api|function|component|error|stack trace|compile|build|database|sql|python)\b/.test(text)) {
     return 'code';
   }

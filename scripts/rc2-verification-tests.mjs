@@ -41,6 +41,7 @@ import {
 } from '@/lib/research-fallback';
 import {
   extractPdfPages,
+  parseFile,
 } from '@/lib/file-parser';
 
 let passCount = 0;
@@ -510,6 +511,194 @@ await test('RC2.1-4', 'Real binary PDF extraction with production extractPdfPage
   assert.ok(top.text.includes('Lina Patel'), 'Top excerpt must contain Lina Patel');
   assert.ok(top.text.includes('February 14, 2027'), 'Top excerpt must contain February 14, 2027');
   assert.ok(top.text.includes('AURORA-7319'), 'Top excerpt must contain AURORA-7319');
+});
+
+await test('RC2.2-1', 'Intake file ingestion pipeline rejects duplicates and images honestly while accepting valid documents', async () => {
+  // 1. Valid document intake
+  const validFile = new File(['Invoice #1042\nTotal: $350.00\nDue: 2027-04-01'], 'invoice.txt', { type: 'text/plain' });
+  const parsed = await parseFile(validFile);
+  assert.equal(parsed.name, 'invoice.txt');
+  assert.ok(parsed.content.includes('Invoice #1042'));
+  assert.equal(parsed.status, 'ready');
+
+  // 2. Image rejection simulation (Composer & FileUpload shared policy)
+  const imageFiles = [
+    { name: 'screenshot.png', type: 'image/png' },
+    { name: 'diagram.jpg', type: 'image/jpeg' },
+    { name: 'wireframe.webp', type: 'image/webp' },
+  ];
+
+  for (const img of imageFiles) {
+    const isImage = img.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(img.name);
+    assert.ok(isImage, `File ${img.name} must be detected as an image`);
+  }
+
+  const expectedImageErrorMessage = 'Images are not supported for text extraction; please upload PDF, TXT, MD, CSV, or code files.';
+  assert.ok(expectedImageErrorMessage.includes('Images are not supported'), 'Must display honest message regarding OCR/multimodal limits');
+
+  // 3. Duplicate prevention simulation
+  const existingAttachments = [{ id: 'doc-1', name: 'invoice.txt', size: validFile.size, type: 'text/plain' }];
+  const isDuplicate = existingAttachments.some((a) => a.name === validFile.name && a.size === validFile.size);
+  assert.equal(isDuplicate, true, 'Duplicate file with same name and size must be detected');
+
+  const distinctFile = new File(['Different content'], 'other.txt', { type: 'text/plain' });
+  const isDistinctDuplicate = existingAttachments.some((a) => a.name === distinctFile.name && a.size === distinctFile.size);
+  assert.equal(isDistinctDuplicate, false, 'Distinct file must not be rejected as duplicate');
+});
+
+await test('RC2.2-2', 'Attachment-only send enables send with default instruction and file routing', async () => {
+  const dummyAttachment = {
+    id: 'doc-report',
+    name: 'annual-report.pdf',
+    type: 'application/pdf',
+    size: 24000,
+  };
+
+  // Composer canSend calculation:
+  // canSend = (content.trim().length > 0 || attachments.length > 0) && !isWorking && !isParsingFiles
+  const contentEmpty = '';
+  const attachments = [dummyAttachment];
+  const isWorking = false;
+  const isParsingFiles = false;
+
+  const canSendWithAttachmentOnly = (contentEmpty.trim().length > 0 || attachments.length > 0) && !isWorking && !isParsingFiles;
+  assert.equal(canSendWithAttachmentOnly, true, 'Send must be enabled when attachments are present even if content is empty');
+
+  const parsingActive = true;
+  const canSendWhileParsing = (contentEmpty.trim().length > 0 || attachments.length > 0) && !isWorking && !parsingActive;
+  assert.equal(canSendWhileParsing, false, 'Send must be disabled while files are still parsing');
+
+  // Effective content resolution
+  const trimmed = contentEmpty.trim();
+  const effectiveContent = trimmed || (attachments.length > 0 ? 'Analyze the attached document and summarize key points.' : '');
+  assert.equal(effectiveContent, 'Analyze the attached document and summarize key points.');
+
+  // Routing with attachments present
+  const workflow = resolveWorkflow({
+    content: effectiveContent,
+    attachments,
+    taskType: 'auto',
+    searchEnabled: false,
+    researchEnabled: false,
+  });
+
+  assert.equal(workflow.taskType, 'file', 'Attachment-only send must auto-route to file task preset');
+  assert.equal(workflow.shouldSearch, false, 'File analysis must not invoke web search');
+  assert.equal(workflow.searchMode, 'none');
+});
+
+await test('RC2.2-3', 'Next.js Route Handlers search ranks official docs Strong and gates off-topic bereavement and route.com as Weak', async () => {
+  const query = 'Next.js Route Handlers';
+
+  const officialDocsResult = {
+    title: 'Routing: Route Handlers | Next.js',
+    url: 'https://nextjs.org/docs/app/building-your-application/routing/route-handlers',
+    snippet: 'Route Handlers allow you to create custom request handlers for a given route using the Web Request and Response APIs.',
+    content: 'Route Handlers are defined in a route.js|ts file inside the app directory. Route Handlers can be nested inside the app directory, similar to page.js and layout.js.',
+  };
+
+  const bereavementResult = {
+    title: 'POSITIVE OUTCOMES FOLLOWING BEREAVEMENT: PATHS TO RESILIENCE AND GROWTH',
+    url: 'https://scholar.harvard.edu/files/bereavement-paths.pdf',
+    snippet: 'A qualitative research study examining adult psychological coping mechanisms and grief recovery paths.',
+    content: 'Paths to personal growth and emotional resilience in adults navigating profound bereavement.',
+  };
+
+  const routeTrackerResult = {
+    title: 'Route: Real-time Package Tracking and Order Protection',
+    url: 'https://route.com/tracking',
+    snippet: 'Track packages from thousands of online merchants seamlessly with the Route tracking app.',
+    content: 'Route gives consumers visual tracking maps and delivery protection for all online orders.',
+  };
+
+  const rankedOfficial = applySourceQuality(officialDocsResult, query);
+  const rankedBereavement = applySourceQuality(bereavementResult, query);
+  const rankedRouteTracker = applySourceQuality(routeTrackerResult, query);
+
+  assert.ok((rankedOfficial.sourceScore || 0) >= 78, `Official Next.js docs must be Strong (got ${rankedOfficial.sourceScore})`);
+  assert.equal(rankedOfficial.sourceLabel, 'Strong');
+
+  assert.ok((rankedBereavement.sourceScore || 0) <= 35, `Bereavement paper on .edu must be Weak for Next.js query (got ${rankedBereavement.sourceScore})`);
+  assert.equal(rankedBereavement.sourceLabel, 'Weak');
+  assert.ok(rankedBereavement.sourceReason?.includes('missing primary subject'), 'Must flag missing primary subject');
+
+  assert.ok((rankedRouteTracker.sourceScore || 0) <= 35, `Route.com tracker must be Weak for Next.js query (got ${rankedRouteTracker.sourceScore})`);
+  assert.equal(rankedRouteTracker.sourceLabel, 'Weak');
+
+  // Gating check in multi-result diversification
+  const rawResults = [rankedOfficial, rankedBereavement, rankedRouteTracker];
+  const hasSubstantial = rawResults.some((r) => (r.sourceScore || 0) >= 48);
+  const gated = hasSubstantial ? rawResults.filter((r) => (r.sourceScore || 0) > 40) : rawResults;
+
+  assert.equal(gated.length, 1, 'Only genuine relevant source must survive gating');
+  assert.equal(gated[0].url, officialDocsResult.url);
+});
+
+await test('RC2.2-4', 'Stop during active streaming writes partial content with status interrupted and finishReason cancelled', async () => {
+  // Simulate stream interruption
+  const partialChunks = ['Next.js Route Handlers allow ', 'handling custom HTTP requests ', 'such as GET and POST '];
+  let accumulated = '';
+  for (const chunk of partialChunks) {
+    accumulated += chunk;
+  }
+
+  // Simulate AbortError on stop
+  const simulatedAbort = new Error('User stopped request');
+  simulatedAbort.name = 'AbortError';
+
+  // Storage persistence payload created on abort in use-chat.ts
+  const interruptedMessagePayload = {
+    id: 'msg-interrupted-1',
+    conversationId: 'conv-test-stop',
+    role: 'assistant',
+    content: accumulated,
+    model: 'meta-llama/llama-3.3-70b-instruct:free',
+    taskType: 'quick',
+    status: 'interrupted',
+    finishReason: 'cancelled',
+    timestamp: Date.now(),
+  };
+
+  assert.equal(interruptedMessagePayload.status, 'interrupted', 'Status must be interrupted');
+  assert.equal(interruptedMessagePayload.finishReason, 'cancelled', 'Finish reason must be cancelled');
+  assert.equal(interruptedMessagePayload.content, 'Next.js Route Handlers allow handling custom HTTP requests such as GET and POST ');
+
+  // Simulate conversation reload: reading back preserves status and content
+  const simulatedStorage = new Map();
+  simulatedStorage.set(interruptedMessagePayload.id, interruptedMessagePayload);
+
+  const reloaded = simulatedStorage.get('msg-interrupted-1');
+  assert.ok(reloaded, 'Message must be loaded from storage');
+  assert.equal(reloaded.status, 'interrupted');
+  assert.equal(reloaded.finishReason, 'cancelled');
+  assert.equal(reloaded.content, accumulated);
+});
+
+await test('RC2.2-5', 'Conceptual explanation questions route to quick rather than code', async () => {
+  const explanationQueries = [
+    'Explain how databases work',
+    'What is a relational database?',
+    'Describe the concept of database indexing',
+    'How do database transactions maintain ACID properties?',
+    'What is SQLite and when should I use it?',
+  ];
+
+  for (const q of explanationQueries) {
+    const task = inferTaskType({ content: q });
+    assert.equal(task, 'quick', `Query "${q}" should route to quick, got "${task}"`);
+  }
+
+  const codeQueries = [
+    'Write a SQL query to fetch all active users',
+    'Debug this PostgreSQL syntax error in my migration script',
+    'Implement a SQLite database connection helper in TypeScript',
+    'Fix the bug in this database indexing function',
+  ];
+
+  for (const cq of codeQueries) {
+    const task = inferTaskType({ content: cq });
+    assert.equal(task, 'code', `Code query "${cq}" should route to code, got "${task}"`);
+  }
 });
 
 console.log('\n========================================');

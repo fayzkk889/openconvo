@@ -156,6 +156,46 @@ const GENERIC_QUERY_WORDS = new Set([
   'items',
 ]);
 
+const COMMON_TECH_NAMES = [
+  'next.js',
+  'nextjs',
+  'react',
+  'reactjs',
+  'vue.js',
+  'vuejs',
+  'vue',
+  'angular',
+  'svelte',
+  'sveltekit',
+  'node.js',
+  'nodejs',
+  'express.js',
+  'express',
+  'typescript',
+  'javascript',
+  'python',
+  'rust',
+  'golang',
+  'docker',
+  'kubernetes',
+  'sqlite',
+  'postgresql',
+  'postgres',
+  'mongodb',
+  'mysql',
+  'redis',
+  'supabase',
+  'prisma',
+  'tailwind',
+  'graphql',
+  'openrouter',
+  'anthropic',
+  'openai',
+  'polaris labs',
+  'route handlers',
+  'app router',
+];
+
 export function extractPrimarySubjects(query: string): string[] {
   const sanitized = query
     .replace(/\b(?:this\s+(?:question|prompt|request|query|task)\s+is\s+)?(?:unrelated\s+to|not\s+related\s+to|not\s+about|excluding)\s+[^.,;\n]+/gi, ' ')
@@ -171,7 +211,16 @@ export function extractPrimarySubjects(query: string): string[] {
     }
   }
 
-  // 2. Multi-word capitalized proper nouns (e.g., Route Handlers, Polaris Labs, SQLite)
+  // 2. Recognized common tech frameworks and products even in lowercase or without dots
+  const lowerSanitized = sanitized.toLowerCase();
+  for (const tech of COMMON_TECH_NAMES) {
+    const pattern = new RegExp(`\\b${tech.replace('.', '\\.')}\\b`, 'i');
+    if (pattern.test(lowerSanitized)) {
+      subjects.push(tech);
+    }
+  }
+
+  // 3. Multi-word capitalized proper nouns (e.g., Route Handlers, Polaris Labs, SQLite)
   const capMatches = sanitized.match(/\b[A-Z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9]+)?(?:\s+[A-Z][a-zA-Z0-9]*)*\b/g);
   if (capMatches) {
     for (const m of capMatches) {
@@ -215,14 +264,28 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
     return haystack.includes(cleanSubj) || (compactSubj.length >= 3 && haystack.includes(compactSubj));
   });
 
+  const isAcademicOrGovQuery = /\b(research|study|paper|clinical|trial|health|medicine|medical|law|legal|statute|regulation|government|policy|academic|journal|university|bereavement|psychology|science|census|tax)\b/i.test(query);
+  const isEduOrGovHost = /(^|\.)(gov|edu)$/i.test(host);
+
   if (!matchesPrimarySubject) {
-    score -= 20;
+    score -= 30;
     reasons.push('missing primary subject');
   }
 
+  // An .edu or .gov host is only a primary host if the query is academic/governmental or haystack matches subject
   const isPrimaryHost = !isPoorOverlap &&
     matchesPrimarySubject &&
-    PRIMARY_HOST_PATTERNS.some((pattern) => pattern.test(host));
+    PRIMARY_HOST_PATTERNS.some((pattern) => {
+      if (pattern.test('.gov') || pattern.test('.edu')) {
+        return pattern.test(host) && (isAcademicOrGovQuery || matchesPrimarySubject);
+      }
+      return pattern.test(host);
+    });
+
+  if (isEduOrGovHost && !isAcademicOrGovQuery && !matchesPrimarySubject) {
+    score -= 20;
+    reasons.push('unrelated edu/gov domain');
+  }
 
   const isExactTopicHost = !isPoorOverlap &&
     matchesPrimarySubject &&
@@ -383,7 +446,10 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
     safeScore = Math.min(safeScore, 45);
   }
   if (!matchesPrimarySubject) {
-    safeScore = Math.min(safeScore, 40);
+    safeScore = Math.min(safeScore, 35);
+  }
+  if (isEduOrGovHost && !isAcademicOrGovQuery && !matchesPrimarySubject) {
+    safeScore = Math.min(safeScore, 25);
   }
   return {
     ...result,

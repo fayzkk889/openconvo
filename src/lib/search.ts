@@ -144,7 +144,11 @@ export async function searchWebMany(
     dedupeResults([...rawRankedResults, ...seededResults]),
     rankingQuery
   );
-  const results = diversifyResearchResults(rankedResults, rankingQuery, entities)
+  const hasSubstantialSources = rankedResults.some((result) => (result.sourceScore || 0) >= 48);
+  const gatedResults = hasSubstantialSources
+    ? rankedResults.filter((result) => (result.sourceScore || 0) > 40)
+    : rankedResults;
+  const results = diversifyResearchResults(gatedResults, rankingQuery, entities)
     .slice(0, maxCombinedResultsForMode(mode));
   const providers = Array.from(new Set(responses.flatMap((response) =>
     response.provider && response.provider !== 'none' ? [response.provider] : []

@@ -212,11 +212,20 @@ export interface StructuredResearchPlan {
   stoppingCriteria?: string;
 }
 
+export function stripNegativeExclusions(text: string): string {
+  return text
+    .replace(/\b(?:this\s+(?:question|prompt|request|query|task)\s+is\s+)?(?:unrelated\s+to|not\s+related\s+to|not\s+about|unconnected\s+with|unconnected\s+to|excluding|except\s+for|without\s+regard\s+to)\s+[^.,;\n]+/gi, ' ')
+    .replace(/\b(?:do\s+not|don'?t)\s+(?:include|mention|refer\s+to|mix\s+with|confuse\s+with)\s+[^.,;\n]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function planResearchQueries(
   query: string,
   options?: ResearchPlanOptions
 ): ResearchPlan {
-  const originalQuery = normalizeSearchQuery(query);
+  const sanitizedQuery = stripNegativeExclusions(query);
+  const originalQuery = normalizeSearchQuery(sanitizedQuery || query);
   const contextEntities = (options?.contextEntities || []).filter(Boolean);
   const analysis = analyzeResearchQuery(originalQuery);
   const isContextDependent = isContextDependentQuery(originalQuery, analysis.subjects);
@@ -380,10 +389,11 @@ function extractKeyKeywords(text: string): string {
 }
 
 function analyzeResearchQuery(query: string): ResearchAnalysis {
+  const sanitized = stripNegativeExclusions(query);
   return {
-    originalQuery: query,
-    intent: inferResearchIntent(query),
-    subjects: extractCandidateSubjects(query),
+    originalQuery: sanitized || query,
+    intent: inferResearchIntent(sanitized || query),
+    subjects: extractCandidateSubjects(sanitized || query),
   };
 }
 
@@ -586,14 +596,15 @@ function deepResearchQueries(analysis: ResearchAnalysis): string[] {
 }
 
 function extractCandidateSubjects(query: string): string[] {
-  const quoted = Array.from(query.matchAll(/"([^"]{2,100})"|'([^']{2,100})'/g)).map((match) => match[1] || match[2]);
-  const knowledgeTopic = extractKnowledgeTopic(query);
-  const strippedQuery = stripQuestionFrame(query);
+  const sanitized = stripNegativeExclusions(query);
+  const quoted = Array.from(sanitized.matchAll(/"([^"]{2,100})"|'([^']{2,100})'/g)).map((match) => match[1] || match[2]);
+  const knowledgeTopic = extractKnowledgeTopic(sanitized);
+  const strippedQuery = stripQuestionFrame(sanitized);
   const namedSubjects = extractNamedSubjects(strippedQuery);
-  const aiModelSubjects = extractAiModelSubjects(query);
-  const listedThingSubjects = extractListedThingSubjects(query);
-  const productCategorySubjects = extractProductCategorySubjects(query);
-  const purchaseSubjects = extractPurchaseSubjects(query);
+  const aiModelSubjects = extractAiModelSubjects(sanitized);
+  const listedThingSubjects = extractListedThingSubjects(sanitized);
+  const productCategorySubjects = extractProductCategorySubjects(sanitized);
+  const purchaseSubjects = extractPurchaseSubjects(sanitized);
   const comparisonParts = extractComparisonSubjects(strippedQuery);
   const prepositionSubjects = Array.from(strippedQuery.matchAll(/\b(?:of|for|about|on|regarding|between)\s+([^?.,;:]{3,120})/gi))
     .map((match) => cleanSubject(match[1] || ''))
@@ -620,7 +631,8 @@ function extractCandidateSubjects(query: string): string[] {
 }
 
 function extractNamedSubjects(query: string): string[] {
-  const normalized = normalizeSubject(query);
+  const sanitized = stripNegativeExclusions(query);
+  const normalized = normalizeSubject(sanitized);
   const matches = mostlyUppercaseProse(normalized)
     ? []
     : Array.from(normalized.matchAll(

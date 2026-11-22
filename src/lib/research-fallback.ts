@@ -18,13 +18,25 @@ export function buildResearchFallbackAnswer({
   sources?: FallbackSource[];
   reason?: string;
 }): string {
-  const usefulSources = (sources || [])
-    .filter((source) => source && source.title && source.url)
+  const allSources = sources || [];
+  const usefulSources = allSources
+    .filter((source) => {
+      if (!source || !source.title || !source.url) return false;
+      if (source.sourceLabel === 'Weak') return false;
+      if (typeof source.sourceScore === 'number' && source.sourceScore < 50 && source.sourceLabel !== 'Strong' && source.sourceLabel !== 'Useful') {
+        return false;
+      }
+      return true;
+    })
     .slice(0, 8);
 
   if (usefulSources.length === 0) {
+    const noticeHeading = allSources.length > 0
+      ? '> **Research Notice (Insufficient Evidence Quality)**: Web research was conducted, but retrieved sources did not meet evidence quality standards for this topic. OpenConvo cannot ground this answer in verified evidence.'
+      : '> **Research Notice (No Sources Retrieved)**: Web research was attempted, but no usable external sources were returned by search providers. OpenConvo cannot ground this answer in verified evidence.';
+
     return [
-      '> **Research Notice (No Sources Retrieved)**: Web research was attempted, but no usable external sources were returned by search providers. OpenConvo cannot ground this answer in verified evidence.',
+      noticeHeading,
       '',
       reason ? `**Failure reason:** ${reason}` : '',
       question ? `**Original question:** ${question}` : '',

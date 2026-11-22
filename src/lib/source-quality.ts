@@ -87,6 +87,104 @@ const TREND_SNAPSHOT_HOST_HINTS = [
   'trendsmap.',
 ];
 
+const GENERIC_QUERY_WORDS = new Set([
+  'route',
+  'routes',
+  'routing',
+  'handler',
+  'handlers',
+  'docs',
+  'documentation',
+  'developer',
+  'guide',
+  'guides',
+  'code',
+  'codes',
+  'coding',
+  'page',
+  'pages',
+  'site',
+  'sites',
+  'help',
+  'work',
+  'works',
+  'working',
+  'post',
+  'posts',
+  'get',
+  'gets',
+  'api',
+  'apis',
+  'sdk',
+  'sdks',
+  'spec',
+  'specs',
+  'specification',
+  'file',
+  'files',
+  'link',
+  'links',
+  'read',
+  'list',
+  'lists',
+  'build',
+  'test',
+  'tests',
+  'app',
+  'apps',
+  'official',
+  'explain',
+  'research',
+  'learn',
+  'using',
+  'based',
+  'about',
+  'best',
+  'review',
+  'reviews',
+  'price',
+  'pricing',
+  'cost',
+  'costs',
+  'news',
+  'update',
+  'updates',
+  'free',
+  'online',
+  'data',
+  'item',
+  'items',
+]);
+
+export function extractPrimarySubjects(query: string): string[] {
+  const sanitized = query
+    .replace(/\b(?:this\s+(?:question|prompt|request|query|task)\s+is\s+)?(?:unrelated\s+to|not\s+related\s+to|not\s+about|excluding)\s+[^.,;\n]+/gi, ' ')
+    .replace(/\b(?:do\s+not|don'?t)\s+(?:include|mention|refer\s+to)\s+[^.,;\n]+/gi, ' ');
+
+  const subjects: string[] = [];
+
+  // 1. Tech products / brands with dots or numbers (e.g. Next.js, Vue.js, Node.js, GPT-4, Claude-3)
+  const dotTech = sanitized.match(/\b([A-Za-z0-9]+(?:\.[A-Za-z0-9]+)+)\b/g);
+  if (dotTech) {
+    for (const dt of dotTech) {
+      if (dt.length >= 3 && !/\b(?:e\.g|i\.e)\b/i.test(dt)) subjects.push(dt);
+    }
+  }
+
+  // 2. Multi-word capitalized proper nouns (e.g., Route Handlers, Polaris Labs, SQLite)
+  const capMatches = sanitized.match(/\b[A-Z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9]+)?(?:\s+[A-Z][a-zA-Z0-9]*)*\b/g);
+  if (capMatches) {
+    for (const m of capMatches) {
+      const trimmed = m.trim();
+      if (trimmed.length >= 3 && !/^(?:Research|Explain|What|How|Why|When|Where|Who|This|That|The|And|For|With|Show|Does|Can|Could|Should)$/i.test(trimmed)) {
+        subjects.push(trimmed);
+      }
+    }
+  }
+
+  return Array.from(new Set(subjects.map((s) => s.toLowerCase())));
+}
+
 export function rankSearchResults(results: SearchResult[], query: string): SearchResult[] {
   return results
     .map((result) => applySourceQuality(result, query))
@@ -110,13 +208,47 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
     reasons.push(overlap === 0 ? 'no query term match' : 'isolated single-term match');
   }
 
-  const isPrimaryHost = !isPoorOverlap && PRIMARY_HOST_PATTERNS.some((pattern) => pattern.test(host));
-  const isExactTopicHost = !isPoorOverlap && queryTerms.some((term) =>
-    host === `${term}.com` ||
-    host === `${term}.org` ||
-    host === `${term}.net` ||
-    host.startsWith(`${term}.`)
-  );
+  const primarySubjects = extractPrimarySubjects(query);
+  const matchesPrimarySubject = primarySubjects.length === 0 || primarySubjects.some((subj) => {
+    const cleanSubj = subj.toLowerCase();
+    const compactSubj = cleanSubj.replace(/[^a-z0-9]/g, '');
+    return haystack.includes(cleanSubj) || (compactSubj.length >= 3 && haystack.includes(compactSubj));
+  });
+
+  if (!matchesPrimarySubject) {
+    score -= 20;
+    reasons.push('missing primary subject');
+  }
+
+  const isPrimaryHost = !isPoorOverlap &&
+    matchesPrimarySubject &&
+    PRIMARY_HOST_PATTERNS.some((pattern) => pattern.test(host));
+
+  const isExactTopicHost = !isPoorOverlap &&
+    matchesPrimarySubject &&
+    (
+      primarySubjects.some((subj) => {
+        const compact = subj.replace(/[^a-z0-9]/g, '');
+        return compact.length >= 4 && (
+          host === `${compact}.com` ||
+          host === `${compact}.org` ||
+          host === `${compact}.net` ||
+          host === `${compact}.io` ||
+          host === `${compact}.dev` ||
+          host.startsWith(`${compact}.`)
+        );
+      }) ||
+      queryTerms.some((term) =>
+        !GENERIC_QUERY_WORDS.has(term) &&
+        term.length >= 4 &&
+        (host === `${term}.com` ||
+         host === `${term}.org` ||
+         host === `${term}.net` ||
+         host === `${term}.io` ||
+         host === `${term}.dev` ||
+         host.startsWith(`${term}.`))
+      )
+    );
   const lowerQuery = query.toLowerCase();
   const needsPrimaryEvidence = /\b(price|cost|pricing|stock|market|funding|revenue|law|legal|regulation|policy|medical|health|safety|release|released|launch|available|availability|official|docs|documentation|api|model|models)\b/.test(lowerQuery);
   const needsLiveEventEvidence = /\b(schedule|schedules|fixture|fixtures|match|matches|today|tonight|live|score|scores|result|results|winner|winners|loser|losers|standings|table|bracket|tournament|cup|league|championship)\b/.test(lowerQuery);
@@ -171,7 +303,7 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
     reasons.push('official/info path');
   }
 
-  if (host && queryTerms.some((term) => host.includes(term))) {
+  if (host && queryTerms.some((term) => !GENERIC_QUERY_WORDS.has(term) && term.length >= 4 && host.includes(term))) {
     score += 8;
     reasons.push('domain matches topic');
   }
@@ -226,12 +358,12 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
     reasons.push('reference source for non-definition query');
   }
 
-  if (needsPrimaryEvidence && !isPrimaryHost) {
+  if (needsPrimaryEvidence && !isPrimaryHost && !isExactTopicHost) {
     score -= 12;
     reasons.push('not a primary source');
   }
 
-  if (needsPrimaryEvidence && looksLikeComparisonContent && !isPrimaryHost) {
+  if (needsPrimaryEvidence && looksLikeComparisonContent && !isPrimaryHost && !isExactTopicHost) {
     score -= 10;
     reasons.push('comparison page, not primary evidence');
   }
@@ -249,6 +381,9 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   let safeScore = Math.max(0, Math.min(100, Math.round(score)));
   if (isPoorOverlap) {
     safeScore = Math.min(safeScore, 45);
+  }
+  if (!matchesPrimarySubject) {
+    safeScore = Math.min(safeScore, 40);
   }
   return {
     ...result,

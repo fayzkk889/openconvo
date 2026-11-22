@@ -93,6 +93,13 @@ export function hasExplicitNegativeSearchConstraint(text: string): boolean {
     /\b(?:do\s+not|don'?t)\s+(?:search|browse|look\s+up\s+online)\b/i.test(lower) ||
     /\b(?:no\s+web\s+search|no\s+search|without\s+search(?:ing)?|without\s+browsing)\b/i.test(lower) ||
     /\b(?:asking\s+for\s+a\s+plan,\s+not\s+(?:actual\s+)?(?:external\s+)?research)\b/i.test(lower) ||
+    /\b(?:(?:answer\s+)?(?:using|based\s+on|rely(?:ing)?\s+on|from|in)\s+(?:only\s+)?(?:our|this)\s+(?:conversation|chat|discussion))\b/i.test(lower) ||
+    /\b(?:(?:answer\s+)?(?:using|based\s+on|rely(?:ing)?\s+on|from|in)\s+(?:only\s+)?(?:earlier|previous|prior|above)\s+messages?)\b/i.test(lower) ||
+    /\b(?:(?:answer\s+)?(?:using|based\s+on|rely(?:ing)?\s+on|from)\s+(?:only\s+)?(?:the\s+)?(?:information|context|details|facts?|text)\s+(?:above|provided\s+above|already\s+provided|already\s+shared|already\s+known|in\s+(?:my|our)\s+messages?|in\s+(?:this|our)\s+(?:chat|conversation)))\b/i.test(lower) ||
+    /\b(?:facts?\s+(?:you\s+)?already\s+know\s+from\s+this\s+chat)\b/i.test(lower) ||
+    /\b(?:from\s+what\s+(?:we\s+discussed|i\s+told\s+you|i\s+mentioned|you\s+already\s+know))\b/i.test(lower) ||
+    /\b(?:without\s+(?:external\s+)?verification|without\s+looking\s+up\s+anything|without\s+external\s+(?:sources?|research))\b/i.test(lower) ||
+    /\b(?:previously\s+supplied\s+(?:fictional\s+)?(?:project\s+)?facts?)\b/i.test(lower) ||
     /\b(?:using\s+(?:only\s+)?(?:the\s+)?(?:information|context|details|text)\s+(?:in|provided\s+in)\s+my\s+message)\b/i.test(lower) ||
     /\b(?:based\s+(?:only\s+)?on\s+(?:the\s+)?(?:information|context|details|text)\s+(?:in|provided\s+in)\s+my\s+message)\b/i.test(lower) ||
     /\b(?:rely\s+(?:only\s+)?on\s+(?:the\s+)?(?:information|context|details|text)\s+(?:in|provided\s+in)\s+my\s+message)\b/i.test(lower) ||
@@ -343,6 +350,7 @@ export function isObviouslyLocalOrPersonal(text: string): boolean {
     /\b(?:current\s+value\s+of\s+this|value\s+of\s+(?:this\s+)?variable|in\s+this\s+scope)\b/i.test(lower) ||
     /\b(?:compare\s+these\s+two\s+(?:code\s+)?snippets?)\b/i.test(lower) ||
     /\b(?:in\s+my\s+message|provided\s+in\s+my\s+message|from\s+my\s+message|fictional\s+(?:scenario|project|context|entity|product|service|company|application)|my\s+fictional)\b/i.test(lower) ||
+    /\b(?:our\s+conversation|this\s+conversation|in\s+this\s+chat|from\s+this\s+chat|earlier\s+messages?|previous\s+messages?|prior\s+messages?|messages?\s+above|information\s+provided\s+above|facts\s+(?:you\s+)?already\s+know|previously\s+supplied)\b/i.test(lower) ||
     /^(?:can\s+you\s+)?(?:rewrite|summarize|shorten|simplify|reformat|explain)\s+(?:this|that|it)(?:\s+(?:more\s+concisely|more\s+simply|as\s+a\s+table|better))?/i.test(lower)
   );
 }

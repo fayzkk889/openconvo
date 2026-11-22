@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Artifact, Conversation, Message } from '@/types/chat';
 import { extractArtifacts, toStoredArtifact } from '@/lib/artifacts';
 import * as storage from '@/lib/storage';
@@ -8,14 +8,21 @@ import * as storage from '@/lib/storage';
 export function useArtifacts(conversation: Conversation | null, messages: Message[], isStreaming = false) {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const extracted = useMemo(() => extractArtifacts(messages), [messages]);
+  const activeConversationId = conversation?.id || null;
+  const activeConvIdRef = useRef<string | null>(activeConversationId);
+  activeConvIdRef.current = activeConversationId;
 
   const loadArtifacts = useCallback(async () => {
-    if (!conversation) {
+    if (!activeConversationId) {
       setArtifacts([]);
       return;
     }
-    setArtifacts(await storage.getArtifacts(conversation.id));
-  }, [conversation]);
+    const currentConvId = activeConversationId;
+    const loaded = await storage.getArtifacts(currentConvId);
+    if (activeConvIdRef.current === currentConvId) {
+      setArtifacts(loaded);
+    }
+  }, [activeConversationId]);
 
   useEffect(() => {
     loadArtifacts();
@@ -25,7 +32,10 @@ export function useArtifacts(conversation: Conversation | null, messages: Messag
     if (!conversation || isStreaming || extracted.length === 0) return;
 
     const sync = async () => {
-      const current = await storage.getArtifacts(conversation.id);
+      const currentConvId = conversation.id;
+      const current = await storage.getArtifacts(currentConvId);
+      if (activeConvIdRef.current !== currentConvId) return;
+
       const existingKeys = new Set(
         current.map((artifact) => artifact.sourceKey || `${artifact.sourceMessageId || artifact.id}:${artifact.language}`)
       );
@@ -38,8 +48,8 @@ export function useArtifacts(conversation: Conversation | null, messages: Messag
         changed = true;
       }
 
-      if (changed) {
-        setArtifacts(await storage.getArtifacts(conversation.id));
+      if (changed && activeConvIdRef.current === currentConvId) {
+        setArtifacts(await storage.getArtifacts(currentConvId));
       }
     };
 

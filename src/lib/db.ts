@@ -1,9 +1,10 @@
 import { openDB, IDBPDatabase } from 'idb';
 import { Artifact, Conversation, Message, Project } from '@/types/chat';
 import { ModelReliability } from '@/types/models';
+import { DocumentRecord, DocumentChunk } from '@/types/document';
 
-const DB_NAME = 'openconvo';
-const DB_VERSION = 4;
+export const DB_NAME = 'openconvo';
+export const DB_VERSION = 5;
 
 interface OpenConvoDB {
   projects: {
@@ -30,6 +31,16 @@ interface OpenConvoDB {
     key: string;
     value: ModelReliability;
     indexes: { 'by-model': string; 'by-task': string };
+  };
+  documents: {
+    key: string;
+    value: DocumentRecord;
+    indexes: { 'by-conversation': string; 'by-project': string; 'by-fingerprint': string };
+  };
+  documentChunks: {
+    key: string;
+    value: DocumentChunk;
+    indexes: { 'by-document': string; 'by-conversation': string };
   };
 }
 
@@ -80,6 +91,17 @@ export function getDB(): Promise<IDBPDatabase<OpenConvoDB>> {
           if (!reliabilityStore.indexNames.contains('by-task')) {
             reliabilityStore.createIndex('by-task', 'taskType');
           }
+        }
+        if (!db.objectStoreNames.contains('documents')) {
+          const documentStore = db.createObjectStore('documents', { keyPath: 'id' });
+          documentStore.createIndex('by-conversation', 'conversationId');
+          documentStore.createIndex('by-project', 'projectId');
+          documentStore.createIndex('by-fingerprint', 'fingerprint');
+        }
+        if (!db.objectStoreNames.contains('documentChunks')) {
+          const chunkStore = db.createObjectStore('documentChunks', { keyPath: 'id' });
+          chunkStore.createIndex('by-document', 'documentId');
+          chunkStore.createIndex('by-conversation', 'conversationId');
         }
       },
     });

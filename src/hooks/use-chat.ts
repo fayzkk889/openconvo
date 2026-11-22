@@ -1,16 +1,22 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
-import { Message, Attachment, ResearchTrace, ResearchStatus } from '@/types/chat';
-import type { TaskType } from '@/types/chat';
-import { AIModel } from '@/types/models';
+import { Message, Attachment, ResearchTrace, ResearchStatus, RequestLifecycleState } from '@/types/chat';
+import type { TaskType, MessageStatus, TokenUsage } from '@/types/chat';
+import type { DocumentExcerpt, DocumentChunk } from '@/types/document';
+import { AIModel, ReliabilityOutcome } from '@/types/models';
 import { SearchResponse } from '@/types/search';
 import * as storage from '@/lib/storage';
 import { generateId } from '@/lib/utils';
 import { buildResearchFallbackAnswer } from '@/lib/research-fallback';
 import { ensureResearchCitations } from '@/lib/research-citations';
+import { buildDocumentAppendixIfMissing } from '@/lib/document-citations';
+import { retrieveDocumentExcerpts } from '@/lib/document-retrieval';
+import { shouldRetrieveConversationDocuments } from '@/lib/document-followup';
 import { buildConversationTitle } from '@/lib/title';
-import { isCasualGreeting, stripLeadingGreeting } from '@/lib/tasks';
+import { isCasualGreeting, stripLeadingGreeting, resolveWorkflow } from '@/lib/tasks';
+import { extractConversationContextEntities } from '@/lib/research-planner';
+import { consumeChatStream } from '@/lib/sse-parser';
 
 const STREAM_FLUSH_MS = 18;
 const STREAM_FINISH_BUDGET_MS = 900;
@@ -26,6 +32,14 @@ type StreamingDisplay = {
   cancel: () => void;
 };
 
+interface ActiveRun {
+  id: string;
+  conversationId: string;
+  controller: AbortController;
+  state: RequestLifecycleState;
+  startedAt: number;
+}
+
 export function useChat(
   conversationId: string | null,
   model: string,
@@ -37,43 +51,94 @@ export function useChat(
   onModelOutcome?: (outcome: {
     modelId: string;
     taskType?: TaskType;
-    outcome: 'success' | 'failure' | 'rate_limited';
+    outcome: ReliabilityOutcome;
     latencyMs?: number;
   }) => void,
   onModelPreference?: (preference: { modelId: string; taskType?: TaskType }) => void
 ) {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [lifecycleState, setLifecycleState] = useState<RequestLifecycleState>('idle');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isBusy, setIsBusy] = useState(false);
   const [researchStatus, setResearchStatus] = useState<ResearchStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
-  // Load messages when conversation changes
+  const activeRunRef = useRef<ActiveRun | null>(null);
+  const activeConversationIdRef = useRef<string | null>(conversationId);
+  const currentLoadIdRef = useRef<number>(0);
+  const activeStreamingDisplayRef = useRef<StreamingDisplay | null>(null);
+
+  // Load messages and handle conversation switching
   useEffect(() => {
+    activeConversationIdRef.current = conversationId;
+
+    // Invariant: Abort previous active run when switching conversations
+    if (activeRunRef.current) {
+      activeRunRef.current.state = 'cancelled';
+      activeRunRef.current.controller.abort(new Error('Switched conversation'));
+      activeRunRef.current = null;
+    }
+    activeStreamingDisplayRef.current?.cancel();
+    activeStreamingDisplayRef.current = null;
+
+    setLifecycleState('idle');
+    setIsStreaming(false);
+    setIsBusy(false);
+    setResearchStatus(null);
+    setError(null);
+
     if (conversationId) {
       loadMessages(conversationId);
     } else {
       setMessages([]);
     }
+
     return () => {
-      abortRef.current?.abort();
-      setResearchStatus(null);
+      if (activeRunRef.current) {
+        activeRunRef.current.state = 'cancelled';
+        activeRunRef.current.controller.abort(new Error('Unmounting chat'));
+        activeRunRef.current = null;
+      }
+      activeStreamingDisplayRef.current?.cancel();
+      activeStreamingDisplayRef.current = null;
     };
   }, [conversationId]);
 
   const loadMessages = async (convId: string) => {
+    const loadId = ++currentLoadIdRef.current;
     try {
       const msgs = await storage.getMessages(convId);
+      // Invariant: Delayed conversation-A load cannot overwrite conversation B
+      if (loadId !== currentLoadIdRef.current || activeConversationIdRef.current !== convId) {
+        return;
+      }
       setMessages(msgs);
     } catch (err) {
       console.error('Failed to load messages:', err);
     }
   };
 
+  const stopStreaming = useCallback(() => {
+    const currentRun = activeRunRef.current;
+    if (!currentRun) return;
+
+    currentRun.state = 'cancelled';
+    currentRun.controller.abort(new Error('User stopped request'));
+    activeStreamingDisplayRef.current?.cancel();
+    activeStreamingDisplayRef.current = null;
+
+    setLifecycleState('cancelled');
+    setIsStreaming(false);
+    setIsBusy(false);
+    setResearchStatus(null);
+  }, []);
+
   const sendMessage = useCallback(
     async ({
       content,
       attachments,
+      searchEnabled,
+      researchEnabled,
       agentEnabled,
       taskType,
       modelOverride,
@@ -96,123 +161,266 @@ export function useChat(
     }) => {
       if (!conversationId || !content.trim()) return;
 
-      setError(null);
-      setResearchStatus(null);
-      const activeModel = modelOverride || model;
-
-      // Save user message
-      const userMessage = await storage.addMessage(conversationId, {
-        role: 'user',
-        content: content.trim(),
-        model: activeModel,
-        attachments: attachments?.length ? attachments : undefined,
-        taskType,
-      });
-
-      setMessages((prev) => [...prev, userMessage]);
-
-      if (isCasualGreeting(content)) {
-        const assistantMessage = await storage.addMessage(conversationId, {
-          role: 'assistant',
-          content: 'Hey! How can I help?',
-          model: activeModel,
-          researchMode: false,
-          agentMode: false,
-          taskType: 'quick',
-          autoRouted,
-          routingNote,
-        });
-        setMessages((prev) => [...prev, assistantMessage]);
-        if (onTitleGenerated) onTitleGenerated('Greeting');
+      // Invariant 1 & 2: Synchronously acquire the execution lock before the first await
+      const currentRun = activeRunRef.current;
+      if (currentRun && ['preparing', 'searching', 'connecting', 'streaming', 'persisting'].includes(currentRun.state)) {
+        console.warn('Execution lock active; ignoring overlapping send request');
         return;
       }
 
-      // Perform web search if enabled
-      let searchResults: SearchResponse | null = null;
-      const isResearchTask = taskType === 'research' || taskType === 'deep-research';
-      const isQuickTask = taskType === 'quick';
-      const shouldUseSearch = !isQuickTask && isResearchTask;
-      const shouldUseResearch = !isQuickTask && isResearchTask;
-      const searchMode = taskType === 'deep-research' ? 'deep-research' : shouldUseResearch ? 'research' : 'search';
-      if (shouldUseSearch) {
+      const runId = generateId();
+      const runController = new AbortController();
+      const targetConversationId = conversationId;
+      const run: ActiveRun = {
+        id: runId,
+        conversationId: targetConversationId,
+        controller: runController,
+        state: 'preparing',
+        startedAt: Date.now(),
+      };
+      activeRunRef.current = run;
+
+      setLifecycleState('preparing');
+      setIsBusy(true);
+      setError(null);
+      setResearchStatus(null);
+
+      const activeModel = modelOverride || model;
+
+      try {
+        // Step 4: Authoritative workflow resolution
+        const workflow = resolveWorkflow({
+          content,
+          attachments,
+          taskType,
+          searchEnabled,
+          researchEnabled,
+        });
+
+        const effectiveTaskType = workflow.taskType;
+        const isQuickTask = workflow.isQuickTask;
+        const isResearchTask = workflow.shouldSearch;
+        const shouldUseSearch = !isQuickTask && isResearchTask;
+        const shouldUseResearch = shouldUseSearch && workflow.searchMode !== 'search';
+        const searchMode = workflow.searchMode === 'none' ? 'search' : workflow.searchMode;
+
+        // Save user message
+        const userMessage = await storage.addMessage(targetConversationId, {
+          role: 'user',
+          content: content.trim(),
+          model: activeModel,
+          attachments: attachments?.length ? attachments : undefined,
+          taskType: effectiveTaskType,
+        });
+
+        if (!userMessage) {
+          run.state = 'cancelled';
+          return;
+        }
+
+        // Invariant 5: Verify ownership after asynchronous continuation
+        if (activeRunRef.current?.id !== runId || activeConversationIdRef.current !== targetConversationId) {
+          return;
+        }
+
+        setMessages((prev) => [...prev, userMessage]);
+
+        // Step 2 & 5: Persist newly attached document records and chunks to IndexedDB
+        if (attachments?.length) {
+          for (const att of attachments) {
+            if (att.documentRecord && att.chunks?.length) {
+              const docRecord = {
+                ...att.documentRecord,
+                conversationId: targetConversationId,
+                updatedAt: Date.now(),
+              };
+              const chunks = att.chunks.map((chk: DocumentChunk) => ({
+                ...chk,
+                conversationId: targetConversationId,
+              }));
+              await storage.saveDocument(docRecord, chunks);
+            }
+          }
+        }
+
+        // Step 6: Follow-up and current turn document context resolution
+        let documentExcerpts: DocumentExcerpt[] | undefined;
         try {
+          const storedDocs = await storage.getDocumentsByConversation(targetConversationId);
+          const shouldRetrieveDocs = shouldRetrieveConversationDocuments({
+            query: content.trim(),
+            hasActiveAttachments: Boolean(attachments?.length),
+            hasStoredDocuments: storedDocs.length > 0,
+            storedDocuments: storedDocs,
+          });
+
+          if (shouldRetrieveDocs && storedDocs.length > 0) {
+            const convChunks = await storage.getConversationChunks(targetConversationId);
+            if (convChunks.length > 0) {
+              const retrieval = retrieveDocumentExcerpts({
+                query: content.trim(),
+                chunks: convChunks,
+                documents: storedDocs,
+                options: { topK: 8, maxTokens: 3000, expandNeighbors: true },
+              });
+              if (retrieval.excerpts.length > 0) {
+                documentExcerpts = retrieval.excerpts;
+              }
+            }
+          }
+        } catch (docErr) {
+          console.warn('Document retrieval resolution failed:', docErr);
+        }
+
+        // Casual greeting shortcut
+        if (isCasualGreeting(content)) {
+          const assistantMessage = await storage.addMessage(targetConversationId, {
+            role: 'assistant',
+            content: 'Hey! How can I help?',
+            model: activeModel,
+            researchMode: false,
+            agentMode: false,
+            taskType: 'quick',
+            autoRouted,
+            routingNote,
+          });
+
+          if (!assistantMessage || activeRunRef.current?.id !== runId || activeConversationIdRef.current !== targetConversationId) {
+            return;
+          }
+
+          setMessages((prev) => [...prev, assistantMessage]);
+
+          // Step 7: Greeting shortcut must not rename an established conversation
+          const existingMessages = await storage.getMessages(targetConversationId);
+          if (existingMessages.length <= 2 && onTitleGenerated) {
+            onTitleGenerated('Greeting');
+          }
+
+          run.state = 'completed';
+          return;
+        }
+
+        // Title generation: immediate local title if first turn
+        const currentMessages = await storage.getMessages(targetConversationId);
+        const isFirstTurn = currentMessages.length <= 1;
+        const localTitle = buildConversationTitle(content.trim());
+        if (isFirstTurn && onTitleGenerated) {
+          onTitleGenerated(localTitle);
+        }
+
+        // Perform web search if needed
+        let searchResults: SearchResponse | null = null;
+        if (shouldUseSearch) {
+          run.state = 'searching';
+          setLifecycleState('searching');
           const initialPhase = shouldUseResearch ? 'planning' : 'searching';
           setResearchStatus({
             phase: initialPhase,
             mode: searchMode,
             label: researchStatusLabel(initialPhase, searchMode),
           });
-          const searchRes = await fetchWithTimeout('/api/search', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(tavilyApiKey ? { 'x-tavily-key': tavilyApiKey } : {}),
-              ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
-            },
-            body: JSON.stringify({ query: stripLeadingGreeting(content), mode: searchMode, model: activeModel }),
-          }, SEARCH_REQUEST_TIMEOUT_MS);
-          if (searchRes.ok) {
-            searchResults = await searchRes.json();
-            setResearchStatus({
-              phase: 'synthesizing',
-              mode: searchMode,
-              label: researchStatusLabel('synthesizing', searchMode),
-              plannedQueries: searchResults?.plannedQueries?.length,
-              sourceCount: searchResults?.results?.length,
-              openedCount: searchResults?.results?.filter((result) => result.extracted).length,
-            });
-          } else {
-            const err = await searchRes.json().catch(() => ({}));
-            setError(err.error || 'Search failed; continuing without web results');
+
+          try {
+            const contextEntities = extractConversationContextEntities(messages);
+
+            const searchRes = await fetchWithTimeout(
+              '/api/search',
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(tavilyApiKey ? { 'x-tavily-key': tavilyApiKey } : {}),
+                  ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
+                },
+                body: JSON.stringify({
+                  query: stripLeadingGreeting(content),
+                  mode: searchMode,
+                  model: activeModel,
+                  contextEntities: contextEntities.length > 0 ? contextEntities : undefined,
+                }),
+              },
+              SEARCH_REQUEST_TIMEOUT_MS,
+              runController.signal
+            );
+
+            if (activeRunRef.current?.id !== runId || activeConversationIdRef.current !== targetConversationId) {
+              return;
+            }
+
+            if (searchRes.ok) {
+              searchResults = await searchRes.json();
+              setResearchStatus({
+                phase: 'synthesizing',
+                mode: searchMode,
+                label: researchStatusLabel('synthesizing', searchMode),
+                plannedQueries: searchResults?.plannedQueries?.length,
+                sourceCount: searchResults?.results?.length,
+                openedCount: searchResults?.results?.filter((result) => result.extracted).length,
+              });
+            } else {
+              const err = await searchRes.json().catch(() => ({}));
+              setError(err.error || 'Search failed; continuing without web results');
+            }
+          } catch (err) {
+            if ((err as Error).name === 'AbortError' || runController.signal.aborted) {
+              run.state = 'cancelled';
+              return;
+            }
+            console.error('Search failed:', err);
+            setError('Search failed; continuing without web results');
           }
-        } catch (err) {
-          console.error('Search failed:', err);
-          setError('Search failed; continuing without web results');
         }
-      }
 
-      // Prepare messages for API
-      const currentMessages = await storage.getMessages(conversationId);
-      const apiMessages = currentMessages.map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.id === userMessage.id
-          ? withAttachmentCue(m.content, attachments)
-          : m.content,
-      }));
+        if (activeRunRef.current?.id !== runId || activeConversationIdRef.current !== targetConversationId) {
+          return;
+        }
 
-      const runModels = uniqueModels(compareModels?.length ? compareModels : [activeModel]);
-      let firstResponseContent = '';
-      setIsStreaming(true);
-      abortRef.current = new AbortController();
+        // Context construction: exclude error messages, empty placeholders, deduplicate compare runs
+        const historyMessages = await storage.getMessages(targetConversationId);
+        const apiMessages = buildApiMessages(historyMessages, userMessage.id, userMessage.content, attachments);
 
-      try {
+        const runModels = uniqueModels(compareModels?.length ? compareModels : [activeModel]);
+        let firstResponseContent = '';
+        run.state = 'connecting';
+        setLifecycleState('connecting');
+
         for (const runModel of runModels) {
+          if (activeRunRef.current?.id !== runId || activeConversationIdRef.current !== targetConversationId) {
+            return;
+          }
+
           let streamDisplay: StreamingDisplay | null = null;
           const assistantId = generateId();
           const placeholderMessage: Message = {
             id: assistantId,
-            conversationId,
+            conversationId: targetConversationId,
             role: 'assistant',
             content: '',
             model: runModel,
             researchMode: shouldUseResearch,
             agentMode: agentEnabled === true,
-            taskType,
+            taskType: effectiveTaskType,
             autoRouted,
             routingNote,
             compareRun: runModels.length > 1,
-            searchResults: searchResults?.results?.map((r) => ({
+            searchResults: searchResults?.results?.map((r, index) => ({
+              id: r.id || `src_${index + 1}`,
               title: r.title,
               url: r.url,
+              canonicalUrl: r.canonicalUrl || r.url,
+              domain: r.domain,
+              publishedAt: r.publishedAt,
               snippet: r.snippet,
               content: r.content,
               extracted: r.extracted,
-              fetchedAt: r.fetchedAt,
+              fetchedAt: r.fetchedAt || Date.now(),
               sourceScore: r.sourceScore,
               sourceLabel: r.sourceLabel,
               sourceReason: r.sourceReason,
             })),
             researchTrace: buildResearchTrace(searchResults),
+            documentExcerpts,
             timestamp: Date.now(),
           };
 
@@ -224,275 +432,294 @@ export function useChat(
             let fullContent = '';
             let finalModel = runModel;
             streamDisplay = createStreamingDisplay(assistantId, () => finalModel, setMessages);
+            activeStreamingDisplayRef.current = streamDisplay;
 
-            const recordedFallbackFailures = new Set<string>();
-            const processLine = (line: string) => {
-              const trimmed = line.trim();
-              if (!trimmed || !trimmed.startsWith('data: ')) return;
-              try {
-                const data = JSON.parse(trimmed.slice(6));
-                if (data.model) {
-                  finalModel = data.model;
-                }
-                if (data.content) {
-                  fullContent += data.content;
-                  streamDisplay?.append(data.content);
-                }
-                const rateLimitedModels = normalizeStringArray(data.rateLimitedModels);
-                if (rateLimitedModels.length > 0) {
-                  onModelsRateLimited?.(
-                    rateLimitedModels,
-                    typeof data.retryAfterSeconds === 'number' ? data.retryAfterSeconds : undefined,
-                    taskType
-                  );
-                  for (const failedModel of rateLimitedModels) {
-                    recordedFallbackFailures.add(failedModel);
-                  }
-                }
-                for (const failedModel of normalizeStringArray(data.failedModels)) {
-                  if (recordedFallbackFailures.has(failedModel)) continue;
-                  recordedFallbackFailures.add(failedModel);
-                  onModelOutcome?.({ modelId: failedModel, taskType, outcome: 'failure' });
-                }
-              } catch {
-                // skip malformed
-              }
-            };
+            run.state = 'streaming';
+            setLifecycleState('streaming');
+            setIsStreaming(true);
 
-            for (let attempt = 0; attempt <= EMPTY_RESPONSE_RETRY_ATTEMPTS; attempt += 1) {
-              fullContent = '';
-              const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
-                },
-                body: JSON.stringify({
-                  messages: apiMessages,
-                  model: runModel,
-                  availableModels: models
-                    .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
-                    .map((item) => item.id),
-                  systemPrompt: systemPrompt || undefined,
-                  searchResults: compactSearchResultsForAttempt(searchResults?.results, attempt),
-                  attachments,
-                  researchMode: shouldUseResearch,
-                  agentMode: agentEnabled === true,
-                  taskType,
-                }),
-                signal: abortRef.current.signal,
-              });
-
-              if (!response.ok || !response.body) {
-                throw await readChatError(response, 'Failed to send message');
-              }
-
-              const reader = response.body?.getReader();
-              if (!reader) throw new Error('No response stream');
-
-              const decoder = new TextDecoder();
-              let buffer = '';
-              try {
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) break;
-
-                  buffer += decoder.decode(value, { stream: true });
-                  const lines = buffer.split('\n');
-                  buffer = lines.pop() || '';
-
-                  for (const line of lines) {
-                    processLine(line);
-                  }
-                }
-                buffer += decoder.decode();
-                if (buffer.trim()) {
-                  processLine(buffer);
-                }
-              } finally {
-                reader.releaseLock();
-              }
-
-              if (fullContent.trim()) break;
-            }
-
-            if (!fullContent.trim()) {
-              throw new Error('The model returned an empty response after automatic retries. Please try again.');
-            }
-
-            const finalContentWithCitations = shouldUseResearch
-              ? ensureResearchCitations(fullContent, placeholderMessage.searchResults)
-              : fullContent;
-
-            await streamDisplay?.finish(finalContentWithCitations);
-            if (!firstResponseContent) firstResponseContent = finalContentWithCitations;
-
-            await storage.addMessage(conversationId, {
-              role: 'assistant',
-              content: finalContentWithCitations,
-              model: finalModel,
-              researchMode: shouldUseResearch,
-              agentMode: agentEnabled === true,
-              taskType,
-              autoRouted,
-              routingNote,
-              compareRun: runModels.length > 1,
-              searchResults: placeholderMessage.searchResults,
-              researchTrace: placeholderMessage.researchTrace,
-            });
-            onModelOutcome?.({
-              modelId: finalModel,
-              taskType,
-              outcome: 'success',
-              latencyMs: Date.now() - requestStartedAt,
-            });
-
-            const updatedMessages = await storage.getMessages(conversationId);
-            setMessages(updatedMessages);
-          } catch (err) {
-            streamDisplay?.cancel();
-            if ((err as Error).name === 'AbortError') {
-              setMessages((prev) => prev.filter((m) => m.id !== assistantId));
-              return;
-            }
-            const errorMessage = (err as Error).message || 'Failed to get response';
-            const details = parseChatErrorDetails(err);
-            if (details.rateLimitedModels.length > 0) {
-              onModelsRateLimited?.(details.rateLimitedModels, details.retryAfterSeconds, taskType);
-            } else {
-              onModelOutcome?.({ modelId: runModel, taskType, outcome: 'failure' });
-            }
-
-            const fallbackContent = buildClientResearchFallback(content.trim(), placeholderMessage.searchResults, errorMessage);
-            if (fallbackContent) {
-              const storedFallback = await storage.addMessage(conversationId, {
-                role: 'assistant',
-                content: fallbackContent,
-                model: runModel,
-                researchMode: shouldUseResearch,
-                agentMode: agentEnabled === true,
-                taskType,
-                autoRouted,
-                routingNote,
-                compareRun: runModels.length > 1,
-                searchResults: placeholderMessage.searchResults,
-                researchTrace: placeholderMessage.researchTrace,
-              });
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? storedFallback
-                    : m
-                )
-              );
-              if (!firstResponseContent) firstResponseContent = fallbackContent;
-              continue;
-            }
-
-            setError(errorMessage);
-            const storedError = await storage.addMessage(conversationId, {
-              role: 'assistant',
-              content: errorMessage,
-              model: runModel,
-              researchMode: shouldUseResearch,
-              agentMode: agentEnabled === true,
-              taskType,
-              autoRouted,
-              routingNote,
-              compareRun: runModels.length > 1,
-              searchResults: placeholderMessage.searchResults,
-              researchTrace: placeholderMessage.researchTrace,
-              isError: true,
-            });
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId
-                  ? storedError
-                  : m
-              )
-            );
-          }
-        }
-
-        // Generate title if this is the first exchange
-        if (currentMessages.length <= 1 && onTitleGenerated) {
-          const fallbackTitle = buildConversationTitle(content.trim());
-          if (!openrouterApiKey) {
-            onTitleGenerated(fallbackTitle);
-            return;
-          }
-          try {
-            const titleRes = await fetchWithTimeout('/api/chat', {
+            const response = await fetch('/api/chat', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
                 ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
               },
               body: JSON.stringify({
-                messages: [
-                  { role: 'user', content: withAttachmentCue(content.trim(), attachments) },
-                  { role: 'assistant', content: firstResponseContent.slice(0, 500) },
-                ],
-                model: activeModel,
-                generateTitleFor: true,
+                messages: apiMessages,
+                model: runModel,
+                availableModels: models
+                  .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
+                  .map((item) => item.id),
+                systemPrompt: systemPrompt || undefined,
+                searchResults: searchResults?.results,
+                attachments,
+                documentExcerpts,
+                researchMode: shouldUseResearch,
+                agentMode: agentEnabled === true,
+                taskType: effectiveTaskType,
               }),
-            }, TITLE_REQUEST_TIMEOUT_MS);
-            if (titleRes.ok) {
-              const { title } = await titleRes.json();
-              const cleanTitle = typeof title === 'string' ? title.trim() : '';
-              if (cleanTitle && cleanTitle !== 'New conversation') {
-                onTitleGenerated(cleanTitle);
-              } else {
-                onTitleGenerated(fallbackTitle);
-              }
+              signal: runController.signal,
+            });
+
+            if (!response.ok || !response.body) {
+              throw await readChatError(response, 'Failed to send message');
             }
-          } catch {
-            onTitleGenerated(fallbackTitle);
+
+            const streamResult = await consumeChatStream(
+              response.body.getReader(),
+              runModel,
+              {
+                onMeta: (meta) => {
+                  finalModel = meta.model;
+                },
+                onDelta: (delta) => {
+                  if (delta.model) finalModel = delta.model;
+                  streamDisplay?.append(delta.content);
+                },
+                onFallback: (fb) => {
+                  if (fb.toModel) finalModel = fb.toModel;
+                  if (fb.rateLimitedModels?.length) {
+                    onModelsRateLimited?.(fb.rateLimitedModels, fb.retryAfterSeconds, effectiveTaskType);
+                  }
+                  if (fb.fromModel) {
+                    onModelOutcome?.({ modelId: fb.fromModel, taskType: effectiveTaskType, outcome: 'failure' });
+                  }
+                },
+                onComplete: (comp) => {
+                  if (comp.model) finalModel = comp.model;
+                },
+                onInterrupted: (interrupted) => {
+                  if (interrupted.model) finalModel = interrupted.model;
+                },
+                onResearchFallback: (rf) => {
+                  if (rf.model) finalModel = rf.model;
+                },
+                onError: (errEvt) => {
+                  if (errEvt.rateLimitedModels?.length) {
+                    onModelsRateLimited?.(errEvt.rateLimitedModels, errEvt.retryAfterSeconds, effectiveTaskType);
+                  }
+                  for (const m of errEvt.failedModels || []) {
+                    onModelOutcome?.({ modelId: m, taskType: effectiveTaskType, outcome: 'failure' });
+                  }
+                },
+              }
+            );
+
+            if (streamResult.status === 'failed') {
+              throw new Error(streamResult.errorMessage || 'Chat stream failed');
+            }
+
+            fullContent = streamResult.fullContent;
+            finalModel = streamResult.finalModel;
+
+            if (!fullContent.trim()) {
+              throw new Error('The model returned an empty response after automatic retries. Please try again.');
+            }
+
+            await streamDisplay?.finish(fullContent);
+            activeStreamingDisplayRef.current = null;
+
+            if (activeRunRef.current?.id !== runId || activeConversationIdRef.current !== targetConversationId) {
+              return;
+            }
+
+            if (!firstResponseContent) firstResponseContent = fullContent;
+
+            run.state = 'persisting';
+            setLifecycleState('persisting');
+
+            // Step 0 Invariant 5: Verify conversation still exists (not deleted during generation)
+            const targetConv = await storage.getConversation(targetConversationId);
+            if (!targetConv) {
+              run.state = 'cancelled';
+              return;
+            }
+
+            await storage.addMessage(targetConversationId, {
+              role: 'assistant',
+              content: fullContent,
+              model: finalModel,
+              researchMode: shouldUseResearch,
+              agentMode: agentEnabled === true,
+              taskType: effectiveTaskType,
+              autoRouted,
+              routingNote,
+              compareRun: runModels.length > 1,
+              searchResults: placeholderMessage.searchResults,
+              researchTrace: placeholderMessage.researchTrace,
+              documentExcerpts,
+              status: streamResult.status,
+              finishReason: streamResult.finishReason,
+              tokenUsage: streamResult.tokenUsage,
+            });
+
+            if (streamResult.status === 'complete') {
+              onModelOutcome?.({
+                modelId: finalModel,
+                taskType: effectiveTaskType,
+                outcome: 'success',
+                latencyMs: Date.now() - requestStartedAt,
+              });
+            } else if (streamResult.status === 'interrupted') {
+              onModelOutcome?.({
+                modelId: finalModel,
+                taskType: effectiveTaskType,
+                outcome: 'interrupted',
+                latencyMs: Date.now() - requestStartedAt,
+              });
+            }
+
+            if (activeRunRef.current?.id !== runId || activeConversationIdRef.current !== targetConversationId) {
+              return;
+            }
+
+            const updatedMessages = await storage.getMessages(targetConversationId);
+            if (activeConversationIdRef.current === targetConversationId) {
+              setMessages(updatedMessages);
+            }
+          } catch (err) {
+            streamDisplay?.cancel();
+            activeStreamingDisplayRef.current = null;
+
+            if ((err as Error).name === 'AbortError' || runController.signal.aborted) {
+              setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+              run.state = 'cancelled';
+              return;
+            }
+
+            const errorMessage = (err as Error).message || 'Failed to get response';
+            const details = parseChatErrorDetails(err);
+            if (details.rateLimitedModels.length > 0) {
+              onModelsRateLimited?.(details.rateLimitedModels, details.retryAfterSeconds, effectiveTaskType);
+            } else {
+              onModelOutcome?.({ modelId: runModel, taskType: effectiveTaskType, outcome: 'failure' });
+            }
+
+            const fallbackContent = buildClientResearchFallback(content.trim(), placeholderMessage.searchResults, errorMessage);
+            if (fallbackContent) {
+              const storedFallback = await storage.addMessage(targetConversationId, {
+                role: 'assistant',
+                content: fallbackContent,
+                model: runModel,
+                researchMode: shouldUseResearch,
+                agentMode: agentEnabled === true,
+                taskType: effectiveTaskType,
+                autoRouted,
+                routingNote,
+                compareRun: runModels.length > 1,
+                searchResults: placeholderMessage.searchResults,
+                researchTrace: placeholderMessage.researchTrace,
+                documentExcerpts,
+                status: 'degraded',
+                finishReason: 'fallback',
+              });
+
+              if (storedFallback && activeConversationIdRef.current === targetConversationId) {
+                setMessages((prev) =>
+                  prev.map((m) => (m.id === assistantId ? storedFallback : m))
+                );
+              }
+              if (!firstResponseContent) firstResponseContent = fallbackContent;
+              continue;
+            }
+
+            setError(errorMessage);
+            const storedError = await storage.addMessage(targetConversationId, {
+              role: 'assistant',
+              content: errorMessage,
+              model: runModel,
+              researchMode: shouldUseResearch,
+              agentMode: agentEnabled === true,
+              taskType: effectiveTaskType,
+              autoRouted,
+              routingNote,
+              compareRun: runModels.length > 1,
+              searchResults: placeholderMessage.searchResults,
+              researchTrace: placeholderMessage.researchTrace,
+              documentExcerpts,
+              isError: true,
+            });
+
+            if (storedError && activeConversationIdRef.current === targetConversationId) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? storedError : m))
+              );
+            }
           }
         }
+
+        run.state = 'completed';
+
+        // Background title generation (Step 7: Non-blocking, bounded deadline, correct conversation identity)
+        if (isFirstTurn && openrouterApiKey && firstResponseContent && onTitleGenerated) {
+          scheduleModelTitleGeneration({
+            conversationId: targetConversationId,
+            content: content.trim(),
+            attachments,
+            assistantReply: firstResponseContent,
+            model: activeModel,
+            openrouterApiKey,
+            activeConversationIdRef,
+            onTitleGenerated,
+          });
+        }
       } finally {
-        setIsStreaming(false);
-        setResearchStatus(null);
-        abortRef.current = null;
+        // Invariant 6 & 7: Old finally block must never clear a newer run's controller
+        if (activeRunRef.current?.id === runId) {
+          activeRunRef.current = null;
+          setLifecycleState('idle');
+          setIsBusy(false);
+          setIsStreaming(false);
+          setResearchStatus(null);
+        }
       }
     },
     [conversationId, model, systemPrompt, openrouterApiKey, tavilyApiKey, models, onModelsRateLimited, onModelOutcome]
   );
 
-  const stopStreaming = useCallback(() => {
-    abortRef.current?.abort();
-    setIsStreaming(false);
-    setResearchStatus(null);
-  }, []);
-
   const regenerateMessage = useCallback(
     async (messageId: string) => {
       if (!conversationId) return;
 
-      // Find the message index and remove it + everything after
+      const active = activeRunRef.current;
+      if (active && ['preparing', 'searching', 'connecting', 'streaming', 'persisting'].includes(active.state)) {
+        console.warn('Execution lock active; ignoring regenerate request');
+        return;
+      }
+
       const msgIndex = messages.findIndex((m) => m.id === messageId);
       if (msgIndex < 0) return;
 
       const targetMessage = messages[msgIndex];
-
-      // Get the last user message before this assistant message
       const userMsg = [...messages].slice(0, msgIndex).reverse().find((m) => m.role === 'user');
       if (!userMsg) return;
 
-      // Delete messages from storage from msgIndex onwards
-      for (const msg of messages.slice(msgIndex)) {
-        await storage.deleteMessage(msg.id);
-      }
+      const runId = generateId();
+      const runController = new AbortController();
+      const targetConversationId = conversationId;
+      const run: ActiveRun = {
+        id: runId,
+        conversationId: targetConversationId,
+        controller: runController,
+        state: 'preparing',
+        startedAt: Date.now(),
+      };
+      activeRunRef.current = run;
 
-      setMessages((prev) => prev.slice(0, msgIndex));
-
+      setLifecycleState('preparing');
+      setIsBusy(true);
       setError(null);
       setResearchStatus(null);
 
-      const assistantId = generateId();
+      let streamDisplay: StreamingDisplay | null = null;
+      let assistantId = '';
+
+      const stagedOriginalMessages = messages.slice(msgIndex);
+
+      assistantId = generateId();
       const placeholderMessage: Message = {
         id: assistantId,
-        conversationId,
+        conversationId: targetConversationId,
         role: 'assistant',
         content: '',
         model,
@@ -503,155 +730,184 @@ export function useChat(
         routingNote: targetMessage.routingNote,
         searchResults: targetMessage.searchResults,
         researchTrace: targetMessage.researchTrace,
+        documentExcerpts: targetMessage.documentExcerpts,
         timestamp: Date.now(),
       };
 
       setMessages((prev) => [...prev.slice(0, msgIndex), placeholderMessage]);
-      setIsStreaming(true);
 
-      let streamDisplay: StreamingDisplay | null = null;
+      const currentMessages = await storage.getMessages(targetConversationId);
+      const apiMessages = buildApiMessages(currentMessages, userMsg.id, userMsg.content, userMsg.attachments);
+
+      let fullContent = '';
+      let finalModel = model;
+      streamDisplay = createStreamingDisplay(assistantId, () => finalModel, setMessages);
+      activeStreamingDisplayRef.current = streamDisplay;
+      const requestStartedAt = Date.now();
 
       try {
-        abortRef.current = new AbortController();
-        const requestStartedAt = Date.now();
-        let fullContent = '';
-        let finalModel = model;
-        streamDisplay = createStreamingDisplay(assistantId, () => finalModel, setMessages);
+        run.state = 'streaming';
+        setLifecycleState('streaming');
+        setIsStreaming(true);
 
-        const currentMessages = await storage.getMessages(conversationId);
-        const apiMessages = currentMessages.map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.id === userMsg.id
-            ? withAttachmentCue(m.content, userMsg.attachments)
-            : m.content,
-        }));
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
+          },
+          body: JSON.stringify({
+            messages: apiMessages,
+            model,
+            availableModels: models
+              .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
+              .map((item) => item.id),
+            systemPrompt: systemPrompt || undefined,
+            searchResults: targetMessage.searchResults,
+            attachments: userMsg.attachments,
+            documentExcerpts: targetMessage.documentExcerpts,
+            researchMode: targetMessage.researchMode === true,
+            agentMode: targetMessage.agentMode === true,
+            taskType: targetMessage.taskType,
+          }),
+          signal: runController.signal,
+        });
 
-        const recordedFallbackFailures = new Set<string>();
-        const processLine = (line: string) => {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith('data: ')) return;
-          try {
-            const data = JSON.parse(trimmed.slice(6));
-            if (data.model) {
-              finalModel = data.model;
-            }
-            if (data.content) {
-              fullContent += data.content;
-              streamDisplay?.append(data.content);
-            }
-            const rateLimitedModels = normalizeStringArray(data.rateLimitedModels);
-            if (rateLimitedModels.length > 0) {
-              onModelsRateLimited?.(
-                rateLimitedModels,
-                typeof data.retryAfterSeconds === 'number' ? data.retryAfterSeconds : undefined,
-                targetMessage.taskType
-              );
-              for (const failedModel of rateLimitedModels) {
-                recordedFallbackFailures.add(failedModel);
-              }
-            }
-            for (const failedModel of normalizeStringArray(data.failedModels)) {
-              if (recordedFallbackFailures.has(failedModel)) continue;
-              recordedFallbackFailures.add(failedModel);
-              onModelOutcome?.({ modelId: failedModel, taskType: targetMessage.taskType, outcome: 'failure' });
-            }
-          } catch {
-            // skip malformed
-          }
-        };
-
-        for (let attempt = 0; attempt <= EMPTY_RESPONSE_RETRY_ATTEMPTS; attempt += 1) {
-          fullContent = '';
-          const response = await fetch('/api/chat', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
-            },
-            body: JSON.stringify({
-              messages: apiMessages,
-              model,
-              availableModels: models
-                .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
-                .map((item) => item.id),
-              systemPrompt: systemPrompt || undefined,
-              searchResults: compactSearchResultsForAttempt(targetMessage.searchResults, attempt),
-              attachments: userMsg.attachments,
-              researchMode: targetMessage.researchMode === true,
-              agentMode: targetMessage.agentMode === true,
-              taskType: targetMessage.taskType,
-            }),
-            signal: abortRef.current.signal,
-          });
-
-          if (!response.ok || !response.body) {
-            throw await readChatError(response, 'Failed to regenerate message');
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split('\n');
-              buffer = lines.pop() || '';
-
-              for (const line of lines) {
-                processLine(line);
-              }
-            }
-            buffer += decoder.decode();
-            if (buffer.trim()) {
-              processLine(buffer);
-            }
-          } finally {
-            reader.releaseLock();
-          }
-
-          if (fullContent.trim()) break;
+        if (!response.ok || !response.body) {
+          throw await readChatError(response, 'Failed to regenerate message');
         }
+
+        const streamResult = await consumeChatStream(
+          response.body.getReader(),
+          model,
+          {
+            onMeta: (meta) => {
+              finalModel = meta.model;
+            },
+            onDelta: (delta) => {
+              if (delta.model) finalModel = delta.model;
+              streamDisplay?.append(delta.content);
+            },
+            onFallback: (fb) => {
+              if (fb.toModel) finalModel = fb.toModel;
+              if (fb.rateLimitedModels?.length) {
+                onModelsRateLimited?.(fb.rateLimitedModels, fb.retryAfterSeconds, targetMessage.taskType);
+              }
+              if (fb.fromModel) {
+                onModelOutcome?.({ modelId: fb.fromModel, taskType: targetMessage.taskType, outcome: 'failure' });
+              }
+            },
+            onComplete: (comp) => {
+              if (comp.model) finalModel = comp.model;
+            },
+            onInterrupted: (interrupted) => {
+              if (interrupted.model) finalModel = interrupted.model;
+            },
+            onResearchFallback: (rf) => {
+              if (rf.model) finalModel = rf.model;
+            },
+            onError: (errEvt) => {
+              if (errEvt.rateLimitedModels?.length) {
+                onModelsRateLimited?.(errEvt.rateLimitedModels, errEvt.retryAfterSeconds, targetMessage.taskType);
+              }
+              for (const m of errEvt.failedModels || []) {
+                onModelOutcome?.({ modelId: m, taskType: targetMessage.taskType, outcome: 'failure' });
+              }
+            },
+          }
+        );
+
+        if (streamResult.status === 'failed') {
+          throw new Error(streamResult.errorMessage || 'Failed to regenerate message');
+        }
+
+        fullContent = streamResult.fullContent;
+        finalModel = streamResult.finalModel;
 
         if (!fullContent.trim()) {
-          throw new Error('The model returned an empty response after automatic retries. Please try again.');
+          throw new Error('The model returned an empty response. Please try again.');
         }
 
-        const finalContentWithCitations = targetMessage.researchMode
-          ? ensureResearchCitations(fullContent, targetMessage.searchResults)
-          : fullContent;
+        await streamDisplay?.finish(fullContent);
+        activeStreamingDisplayRef.current = null;
 
-        await streamDisplay?.finish(finalContentWithCitations);
-
-        await storage.addMessage(conversationId, {
-          role: 'assistant',
-          content: finalContentWithCitations,
-          model: finalModel,
-          researchMode: targetMessage.researchMode,
-          agentMode: targetMessage.agentMode,
-          taskType: targetMessage.taskType,
-          autoRouted: targetMessage.autoRouted,
-          routingNote: targetMessage.routingNote,
-          searchResults: targetMessage.searchResults,
-          researchTrace: targetMessage.researchTrace,
-        });
-        onModelOutcome?.({
-          modelId: finalModel,
-          taskType: targetMessage.taskType,
-          outcome: 'success',
-          latencyMs: Date.now() - requestStartedAt,
-        });
-
-        const updatedMessages = await storage.getMessages(conversationId);
-        setMessages(updatedMessages);
-      } catch (err) {
-        streamDisplay?.cancel();
-        if ((err as Error).name === 'AbortError') {
-          setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+        if (activeRunRef.current?.id !== runId || activeConversationIdRef.current !== targetConversationId) {
           return;
         }
+
+        run.state = 'persisting';
+        setLifecycleState('persisting');
+
+        // Step 0 Invariant 5: Verify conversation still exists (not deleted during generation)
+        const targetConv = await storage.getConversation(targetConversationId);
+        if (!targetConv) {
+          run.state = 'cancelled';
+          return;
+        }
+
+        // Step 0 Invariants 1 & 2: Atomically replace old history in a single IndexedDB transaction
+        await storage.replaceMessagesTransactional(
+          targetConversationId,
+          stagedOriginalMessages.map((m) => m.id),
+          {
+            role: 'assistant',
+            content: fullContent,
+            model: finalModel,
+            researchMode: targetMessage.researchMode,
+            agentMode: targetMessage.agentMode,
+            taskType: targetMessage.taskType,
+            autoRouted: targetMessage.autoRouted,
+            routingNote: targetMessage.routingNote,
+            searchResults: targetMessage.searchResults,
+            researchTrace: targetMessage.researchTrace,
+            documentExcerpts: targetMessage.documentExcerpts,
+            status: streamResult.status,
+            finishReason: streamResult.finishReason,
+            tokenUsage: streamResult.tokenUsage,
+          }
+        );
+
+        if (streamResult.status === 'complete') {
+          onModelOutcome?.({
+            modelId: finalModel,
+            taskType: targetMessage.taskType,
+            outcome: 'success',
+            latencyMs: Date.now() - requestStartedAt,
+          });
+        } else if (streamResult.status === 'interrupted') {
+          onModelOutcome?.({
+            modelId: finalModel,
+            taskType: targetMessage.taskType,
+            outcome: 'interrupted',
+            latencyMs: Date.now() - requestStartedAt,
+          });
+        }
+
+        if (activeRunRef.current?.id !== runId || activeConversationIdRef.current !== targetConversationId) {
+          return;
+        }
+
+        const updatedMessages = await storage.getMessages(targetConversationId);
+        if (activeConversationIdRef.current === targetConversationId) {
+          setMessages(updatedMessages);
+        }
+        run.state = 'completed';
+      } catch (err) {
+        streamDisplay?.cancel();
+        activeStreamingDisplayRef.current = null;
+
+        if ((err as Error).name === 'AbortError' || runController.signal.aborted) {
+          // Step 0 Invariant: Non-destructive cancellation - restore staged original messages in UI
+          if (activeConversationIdRef.current === targetConversationId) {
+            setMessages((prev) => {
+              const beforePlaceholder = prev.slice(0, msgIndex);
+              return [...beforePlaceholder, ...stagedOriginalMessages];
+            });
+          }
+          run.state = 'cancelled';
+          return; // Do NOT record failure for user cancellation
+        }
+
         const errorMessage = (err as Error).message || 'Failed to regenerate message';
         const details = parseChatErrorDetails(err);
         if (details.rateLimitedModels.length > 0) {
@@ -662,53 +918,54 @@ export function useChat(
 
         const fallbackContent = buildClientResearchFallback(userMsg.content, targetMessage.searchResults, errorMessage);
         if (fallbackContent) {
-          const storedFallback = await storage.addMessage(conversationId, {
-            role: 'assistant',
-            content: fallbackContent,
-            model,
-            researchMode: targetMessage.researchMode,
-            agentMode: targetMessage.agentMode,
-            taskType: targetMessage.taskType,
-            autoRouted: targetMessage.autoRouted,
-            routingNote: targetMessage.routingNote,
-            searchResults: targetMessage.searchResults,
-            researchTrace: targetMessage.researchTrace,
-          });
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? storedFallback
-                : m
-            )
+          const targetConv = await storage.getConversation(targetConversationId);
+          if (!targetConv) {
+            run.state = 'cancelled';
+            return;
+          }
+          const storedFallback = await storage.replaceMessagesTransactional(
+            targetConversationId,
+            stagedOriginalMessages.map((m) => m.id),
+            {
+              role: 'assistant',
+              content: fallbackContent,
+              model,
+              researchMode: targetMessage.researchMode,
+              agentMode: targetMessage.agentMode,
+              taskType: targetMessage.taskType,
+              autoRouted: targetMessage.autoRouted,
+              routingNote: targetMessage.routingNote,
+              searchResults: targetMessage.searchResults,
+              researchTrace: targetMessage.researchTrace,
+              documentExcerpts: targetMessage.documentExcerpts,
+              status: 'degraded',
+              finishReason: 'fallback',
+            }
           );
+          if (storedFallback && activeConversationIdRef.current === targetConversationId) {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? storedFallback : m))
+            );
+          }
           return;
         }
 
+        // Genuine error: restore original messages in UI and show error message without deleting historical branch
         setError(errorMessage);
-        const storedError = await storage.addMessage(conversationId, {
-          role: 'assistant',
-          content: errorMessage,
-          model,
-          researchMode: targetMessage.researchMode,
-          agentMode: targetMessage.agentMode,
-          taskType: targetMessage.taskType,
-          autoRouted: targetMessage.autoRouted,
-          routingNote: targetMessage.routingNote,
-          searchResults: targetMessage.searchResults,
-          researchTrace: targetMessage.researchTrace,
-          isError: true,
-        });
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? storedError
-              : m
-          )
-        );
+        if (activeConversationIdRef.current === targetConversationId) {
+          setMessages((prev) => {
+            const beforePlaceholder = prev.slice(0, msgIndex);
+            return [...beforePlaceholder, ...stagedOriginalMessages];
+          });
+        }
       } finally {
-        setIsStreaming(false);
-        setResearchStatus(null);
-        abortRef.current = null;
+        if (activeRunRef.current?.id === runId) {
+          activeRunRef.current = null;
+          setLifecycleState('idle');
+          setIsBusy(false);
+          setIsStreaming(false);
+          setResearchStatus(null);
+        }
       }
     },
     [conversationId, messages, model, systemPrompt, openrouterApiKey, models, onModelsRateLimited, onModelOutcome]
@@ -743,6 +1000,9 @@ export function useChat(
   return {
     messages,
     isStreaming,
+    isBusy,
+    lifecycleState,
+    canStop: isStreaming || isBusy,
     researchStatus,
     error,
     sendMessage,
@@ -753,8 +1013,42 @@ export function useChat(
   };
 }
 
+function buildApiMessages(
+  history: Message[],
+  currentPromptId?: string,
+  currentPromptContent?: string,
+  attachments?: Attachment[]
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  // Step 6: Exclude failed assistant messages (isError === true) and empty messages
+  const valid = history.filter((m) => !m.isError && m.content && m.content.trim().length > 0);
+
+  // Compare mode: deduplicate competing assistant answers to prevent feeding competing answers back to model
+  const deduped: Message[] = [];
+  for (let i = 0; i < valid.length; i++) {
+    const msg = valid[i];
+    if (msg.role === 'assistant' && msg.compareRun) {
+      const siblings = [msg];
+      while (i + 1 < valid.length && valid[i + 1].role === 'assistant' && valid[i + 1].compareRun) {
+        siblings.push(valid[i + 1]);
+        i++;
+      }
+      const preferred = siblings.find((s) => s.preferred) || siblings[siblings.length - 1];
+      deduped.push(preferred);
+    } else {
+      deduped.push(msg);
+    }
+  }
+
+  return deduped.map((m) => ({
+    role: m.role as 'user' | 'assistant',
+    content: m.id === currentPromptId && currentPromptContent
+      ? withAttachmentCue(currentPromptContent, attachments)
+      : m.content,
+  }));
+}
+
 function buildResearchTrace(searchResults: SearchResponse | null): ResearchTrace | undefined {
-  if (!searchResults?.results?.length) return undefined;
+  if (!searchResults) return undefined;
   return {
     query: searchResults.query,
     plannedQueries: searchResults.plannedQueries,
@@ -763,8 +1057,8 @@ function buildResearchTrace(searchResults: SearchResponse | null): ResearchTrace
     provider: searchResults.provider,
     providers: searchResults.providers,
     providerErrors: searchResults.providerErrors,
-    sourceCount: searchResults.results.length,
-    openedCount: searchResults.results.filter((result) => result.extracted).length,
+    sourceCount: searchResults.results?.length || 0,
+    openedCount: searchResults.results?.filter((result) => result.extracted).length || 0,
   };
 }
 
@@ -879,6 +1173,62 @@ function buildClientResearchFallback(
   });
 }
 
+function scheduleModelTitleGeneration({
+  conversationId,
+  content,
+  attachments,
+  assistantReply,
+  model,
+  openrouterApiKey,
+  activeConversationIdRef,
+  onTitleGenerated,
+}: {
+  conversationId: string;
+  content: string;
+  attachments?: Attachment[];
+  assistantReply: string;
+  model: string;
+  openrouterApiKey: string;
+  activeConversationIdRef: React.RefObject<string | null>;
+  onTitleGenerated: (title: string) => void;
+}) {
+  const TITLE_TIMEOUT_MS = 8000;
+  fetchWithTimeout(
+    '/api/chat',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-openrouter-key': openrouterApiKey,
+      },
+      body: JSON.stringify({
+        messages: [
+          { role: 'user', content: withAttachmentCue(content, attachments) },
+          { role: 'assistant', content: assistantReply.slice(0, 500) },
+        ],
+        model,
+        generateTitleFor: true,
+      }),
+    },
+    TITLE_TIMEOUT_MS
+  )
+    .then(async (res) => {
+      if (res.ok) {
+        const { title } = await res.json();
+        const cleanTitle = typeof title === 'string' ? title.trim() : '';
+        if (cleanTitle && cleanTitle !== 'New conversation') {
+          const updated = await storage.updateAutoTitle(conversationId, cleanTitle);
+          if (updated && activeConversationIdRef.current === conversationId) {
+            onTitleGenerated(cleanTitle);
+          }
+        }
+      }
+    })
+    .catch(() => {
+      // Non-blocking: background title generation failure does not interrupt chat flow
+    });
+}
+
 function createStreamingDisplay(
   assistantId: string,
   getModel: () => string,
@@ -971,20 +1321,47 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number): Promise<Response> {
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+  parentSignal?: AbortSignal
+): Promise<Response> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  const onParentAbort = () => {
+    controller.abort(parentSignal?.reason || new Error('User stopped request'));
+    if (timeout) clearTimeout(timeout);
+  };
+
+  if (parentSignal) {
+    if (parentSignal.aborted) {
+      onParentAbort();
+    } else {
+      parentSignal.addEventListener('abort', onParentAbort, { once: true });
+    }
+  }
+
+  timeout = setTimeout(() => controller.abort(new Error('Request timed out. Please retry.')), timeoutMs);
+
   try {
     return await fetch(input, {
       ...init,
       signal: controller.signal,
     });
   } catch (error) {
+    if (parentSignal?.aborted) {
+      const abortErr = new Error('User stopped request');
+      abortErr.name = 'AbortError';
+      throw abortErr;
+    }
     if (controller.signal.aborted) {
       throw new Error('Request timed out. Please retry.');
     }
     throw error;
   } finally {
-    window.clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
+    if (parentSignal) parentSignal.removeEventListener('abort', onParentAbort);
   }
 }

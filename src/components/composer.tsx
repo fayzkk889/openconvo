@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { FileUpload } from '@/components/file-upload';
 import { AgentToggle } from '@/components/agent-toggle';
+import { SearchToggle } from '@/components/search-toggle';
+import { ResearchToggle } from '@/components/research-toggle';
 import { ModelSelector } from '@/components/model-selector';
 import {
   Dropdown,
@@ -13,7 +15,7 @@ import {
   DropdownContent,
   DropdownItem,
 } from '@/components/ui/dropdown';
-import type { Attachment, TaskType } from '@/types/chat';
+import type { Attachment, TaskType, RequestLifecycleState } from '@/types/chat';
 import type { AIModel } from '@/types/models';
 import type { ModelReliability } from '@/types/models';
 import type { PromptSnippet } from '@/types/settings';
@@ -33,6 +35,8 @@ interface ComposerProps {
     compareEnabled?: boolean;
   }) => void;
   isStreaming: boolean;
+  isBusy?: boolean;
+  lifecycleState?: RequestLifecycleState;
   onStop: () => void;
   models: AIModel[];
   selectedModel: string;
@@ -56,6 +60,8 @@ interface ComposerProps {
 export function Composer({
   onSend,
   isStreaming,
+  isBusy,
+  lifecycleState,
   onStop,
   models,
   selectedModel,
@@ -81,22 +87,28 @@ export function Composer({
   const [compareEnabled, setCompareEnabled] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const canSend = content.trim().length > 0 && !isStreaming;
+  const isWorking = isStreaming || Boolean(isBusy);
+  const canSend = content.trim().length > 0 && !isWorking;
 
   const handleSend = useCallback(() => {
     if (!canSend) return;
 
+    const trimmed = content.trim();
+    if (!trimmed) return;
+
+    const currentAttachments = attachments.length > 0 ? attachments : undefined;
+    setContent('');
+    setAttachments([]);
+
     onSend({
-      content: content.trim(),
-      attachments: attachments.length > 0 ? attachments : undefined,
+      content: trimmed,
+      attachments: currentAttachments,
       searchEnabled,
       researchEnabled,
       agentEnabled,
       taskType,
       compareEnabled,
     });
-    setContent('');
-    setAttachments([]);
   }, [canSend, content, attachments, searchEnabled, researchEnabled, agentEnabled, taskType, compareEnabled, onSend]);
 
   const handleKeyDown = useCallback(
@@ -232,6 +244,8 @@ export function Composer({
                 ))}
               </DropdownContent>
             </Dropdown>
+            <SearchToggle enabled={searchEnabled} onToggle={onToggleSearch} />
+            <ResearchToggle enabled={researchEnabled} onToggle={onToggleResearch} />
             <AgentToggle enabled={agentEnabled} onToggle={onToggleAgent} />
             <button
               type="button"
@@ -275,7 +289,7 @@ export function Composer({
           </div>
 
           <div className="ml-auto flex items-center gap-2">
-            {isStreaming ? (
+            {isWorking ? (
               <Button
                 variant="secondary"
                 size="sm"

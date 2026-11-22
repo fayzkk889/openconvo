@@ -117,7 +117,9 @@ export async function streamChat(
   messages: ChatMessage[],
   model: string,
   systemPrompt?: string,
-  apiKey?: string | null
+  apiKey?: string | null,
+  signal?: AbortSignal,
+  timeoutMs = OPENROUTER_REQUEST_TIMEOUT_MS
 ): Promise<Response> {
   const allMessages: ChatMessage[] = [];
   if (systemPrompt) {
@@ -125,12 +127,17 @@ export async function streamChat(
   }
   allMessages.push(...messages);
 
-  const response = await fetchOpenRouterWithTimeout({
-    model,
-    messages: allMessages,
-    stream: true,
-    provider: FREE_ONLY_PROVIDER_OPTIONS,
-  }, apiKey);
+  const response = await fetchOpenRouterWithTimeout(
+    {
+      model,
+      messages: allMessages,
+      stream: true,
+      provider: FREE_ONLY_PROVIDER_OPTIONS,
+    },
+    apiKey,
+    timeoutMs,
+    signal
+  );
 
   if (!response.ok) {
     const errorBody = await response.text();
@@ -143,10 +150,24 @@ export async function streamChat(
 async function fetchOpenRouterWithTimeout(
   body: Record<string, unknown>,
   apiKey?: string | null,
-  timeoutMs = OPENROUTER_REQUEST_TIMEOUT_MS
+  timeoutMs = OPENROUTER_REQUEST_TIMEOUT_MS,
+  parentSignal?: AbortSignal
 ): Promise<Response> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(new Error('Request timed out')), timeoutMs);
+
+  const onParentAbort = () => {
+    controller.abort(parentSignal?.reason || new Error('Aborted by client'));
+  };
+
+  if (parentSignal) {
+    if (parentSignal.aborted) {
+      clearTimeout(timeout);
+      throw parentSignal.reason || new Error('Aborted by client');
+    }
+    parentSignal.addEventListener('abort', onParentAbort, { once: true });
+  }
+
   try {
     return await fetch(`${OPENROUTER_BASE}/chat/completions`, {
       method: 'POST',
@@ -155,12 +176,18 @@ async function fetchOpenRouterWithTimeout(
       body: JSON.stringify(body),
     });
   } catch (error) {
+    if (parentSignal?.aborted) {
+      throw parentSignal.reason || new Error('User stopped request');
+    }
     if (controller.signal.aborted) {
       throw new Error('OpenRouter did not start a response in time. Please retry or choose another free model.');
     }
     throw error;
   } finally {
     clearTimeout(timeout);
+    if (parentSignal) {
+      parentSignal.removeEventListener('abort', onParentAbort);
+    }
   }
 }
 
@@ -351,6 +378,8 @@ function normalizePlannerStrings(value: unknown, maxItems: number, maxChars: num
 }
 
 export async function fetchModels(apiKey?: string | null): Promise<AIModel[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error('Models fetch timeout')), 8000);
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -366,6 +395,7 @@ export async function fetchModels(apiKey?: string | null): Promise<AIModel[]> {
 
     const response = await fetch(`${OPENROUTER_BASE}/models`, {
       headers,
+      signal: controller.signal,
     });
 
     if (!response.ok) return CURATED_FREE_MODELS;
@@ -378,7 +408,12 @@ export async function fetchModels(apiKey?: string | null): Promise<AIModel[]> {
         if (typeof m.id !== 'string') return false;
         if (!m.id.endsWith(':free')) return false;
         const pricing = m.pricing as Record<string, unknown> | undefined;
-        return pricing && isZeroPrice(pricing.prompt) && isZeroPrice(pricing.completion);
+        return (
+          pricing &&
+          isZeroPrice(pricing.prompt) &&
+          isZeroPrice(pricing.completion) &&
+          (pricing.request === undefined || isZeroPrice(pricing.request))
+        );
       })
       .map((m) => ({
         id: m.id as string,
@@ -393,6 +428,8 @@ export async function fetchModels(apiKey?: string | null): Promise<AIModel[]> {
     return freeModels.length > 0 ? freeModels : CURATED_FREE_MODELS;
   } catch {
     return CURATED_FREE_MODELS;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowLeft, KeyRound, LockKeyhole, ServerCog } from 'lucide-react';
+import { ArrowLeft, KeyRound, LockKeyhole, ServerCog, ShieldCheck } from 'lucide-react';
 import { getGithubUrl } from '@/lib/site';
 
 export default function SecurityPage() {
@@ -31,10 +31,18 @@ export default function SecurityPage() {
           </section>
 
           <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-5">
-            <ServerCog className="h-5 w-5" />
-            <h2 className="mt-4 text-lg font-semibold">Hosted limits</h2>
+            <ShieldCheck className="h-5 w-5" />
+            <h2 className="mt-4 text-lg font-semibold">Outbound request boundaries</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">
-              Hosted free chat and hosted search use daily shared quotas. The built-in limiters are in-memory and best for early launches; production-scale deployments should add persistent edge rate limiting.
+              Web research and page extraction enforce strict destination policies: loopback addresses, private networks, cloud metadata endpoints (e.g. 169.254.169.254), internal hostnames, and non-standard schemes are blocked across all network hops and redirects.
+            </p>
+          </section>
+
+          <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-5">
+            <ServerCog className="h-5 w-5" />
+            <h2 className="mt-4 text-lg font-semibold">Hosted limits & concurrency</h2>
+            <p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">
+              Hosted free chat and search use daily quotas with in-flight reservation tracking to prevent concurrent oversubscription. The built-in limiters are in-process and best for personal and small-scale launches; high-traffic production deployments should configure persistent edge rate limiting.
             </p>
           </section>
 

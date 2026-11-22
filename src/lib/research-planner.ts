@@ -23,7 +23,8 @@ type ResearchAnalysis = {
 };
 
 const MAX_PLANNED_QUERIES = 8;
-const MAX_DEEP_PLANNED_QUERIES = 7;
+const MAX_STANDARD_QUERIES = 3;
+const MAX_DEEP_PLANNED_QUERIES = 5;
 const MAX_SUBJECTS = 5;
 
 const STOP_WORDS = new Set([
@@ -193,23 +194,169 @@ const INTENT_WORDS = new Set([
   'winners',
 ]);
 
-export function planResearchQueries(query: string, options?: { deep?: boolean }): ResearchPlan {
+export interface ResearchPlanOptions {
+  deep?: boolean;
+  contextEntities?: string[];
+  maxQueries?: number;
+}
+
+export interface StructuredResearchPlan {
+  originalQuery: string;
+  primaryObjective: string;
+  entities: string[];
+  timeConstraints?: string;
+  comparisonDimensions?: string[];
+  researchQuestions: string[];
+  queries: string[];
+  knownLimitations?: string[];
+  stoppingCriteria?: string;
+}
+
+export function planResearchQueries(
+  query: string,
+  options?: ResearchPlanOptions
+): ResearchPlan {
   const originalQuery = normalizeSearchQuery(query);
+  const contextEntities = (options?.contextEntities || []).filter(Boolean);
+  const isAnaphoric = hasAnaphoricReference(originalQuery);
+
   const analysis = analyzeResearchQuery(originalQuery);
+  if (isAnaphoric && contextEntities.length > 0) {
+    analysis.subjects = dedupeQueries([...contextEntities, ...analysis.subjects]).slice(0, MAX_SUBJECTS);
+  }
+
+  // If originalQuery is long (> 140 chars), create a compact query from key subjects
+  const primaryCompactQuery = originalQuery.length > 140 && analysis.subjects.length > 0
+    ? `${analysis.subjects.slice(0, 3).join(' ')} ${extractKeyKeywords(originalQuery)}`.slice(0, 120).trim()
+    : originalQuery.slice(0, 140);
+
   const candidates = [
     originalQuery,
+    ...(primaryCompactQuery !== originalQuery ? [primaryCompactQuery] : []),
+    ...(isAnaphoric && contextEntities.length > 0
+      ? [`${contextEntities.slice(0, 2).join(' ')} ${stripAnaphoricWords(originalQuery)}`.slice(0, 120).trim()]
+      : []),
     ...priorityIntentQueries(analysis),
     ...subjectQueries(analysis),
     ...intentQueries(analysis),
-    `${originalQuery} sources`,
-    `${originalQuery} analysis`,
-    ...(options?.deep ? deepResearchQueries(analysis) : []),
   ];
 
+  if (options?.deep) {
+    candidates.push(...deepResearchQueries(analysis));
+  }
+
+  const limit = options?.maxQueries || (options?.deep ? MAX_DEEP_PLANNED_QUERIES : MAX_STANDARD_QUERIES);
   return {
     originalQuery,
-    queries: dedupeQueries(candidates).slice(0, options?.deep ? MAX_DEEP_PLANNED_QUERIES : MAX_PLANNED_QUERIES),
+    queries: dedupeQueries(candidates).map((q) => q.slice(0, 160)).slice(0, limit),
   };
+}
+
+export function planStructuredResearch(
+  query: string,
+  options?: ResearchPlanOptions
+): StructuredResearchPlan {
+  const plan = planResearchQueries(query, options);
+  const analysis = analyzeResearchQuery(query);
+  const entities = dedupeQueries([
+    ...(options?.contextEntities || []),
+    ...analysis.subjects,
+  ]).slice(0, 5);
+
+  const researchQuestions: string[] = [];
+  if (analysis.intent.comparison) {
+    researchQuestions.push(`Compare key differences between ${entities.slice(0, 2).join(' and ')}`);
+  }
+  if (analysis.intent.pricing) {
+    researchQuestions.push(`Analyze official pricing, licensing and total cost for ${entities.join(', ')}`);
+  }
+  if (analysis.intent.technical) {
+    researchQuestions.push(`Examine architecture, performance characteristics and documentation`);
+  }
+  if (analysis.intent.freshness) {
+    researchQuestions.push(`Verify latest updates, releases and current status`);
+  }
+  if (researchQuestions.length === 0) {
+    researchQuestions.push(`Investigate primary facts for ${query.slice(0, 80)}`);
+  }
+
+  return {
+    originalQuery: query,
+    primaryObjective: query.slice(0, 200).trim(),
+    entities,
+    timeConstraints: analysis.intent.freshness ? 'latest / current' : undefined,
+    comparisonDimensions: analysis.intent.comparison ? ['performance', 'features', 'pricing'] : undefined,
+    researchQuestions,
+    queries: plan.queries,
+    knownLimitations: ['Dependent on public web sources and provider snippet coverage'],
+    stoppingCriteria: `Collect sufficient evidence addressing key research questions for ${entities.slice(0, 2).join(' and ') || 'primary objective'}`,
+  };
+}
+
+export function detectEvidenceGaps(
+  plan: { queries: string[]; entities?: string[]; researchQuestions?: string[]; primaryObjective?: string },
+  results: Array<{ title: string; snippet?: string; content?: string }>
+): {
+  hasGaps: boolean;
+  missingEntities: string[];
+  missingQuestions: string[];
+  gapQueries: string[];
+} {
+  const allText = results
+    .map((r) => `${r.title} ${r.snippet || ''} ${r.content || ''}`.toLowerCase())
+    .join(' ');
+
+  const missingEntities: string[] = [];
+  for (const entity of plan.entities || []) {
+    const clean = entity.trim().toLowerCase();
+    if (clean.length >= 3 && !allText.includes(clean)) {
+      missingEntities.push(entity);
+    }
+  }
+
+  const missingQuestions: string[] = [];
+  for (const q of plan.researchQuestions || []) {
+    const words = q.toLowerCase().split(/\s+/).filter((w) => w.length >= 4 && !STOP_WORDS.has(w));
+    const matched = words.filter((w) => allText.includes(w)).length;
+    if (words.length > 0 && matched === 0) {
+      missingQuestions.push(q);
+    }
+  }
+
+  const gapQueries: string[] = [];
+  for (const entity of missingEntities.slice(0, 2)) {
+    const baseObj = plan.primaryObjective || plan.queries[0] || '';
+    gapQueries.push(`${entity} ${baseObj}`.slice(0, 120).trim());
+  }
+
+  const hasGaps = (missingEntities.length > 0 || missingQuestions.length > 0) && gapQueries.length > 0;
+  return {
+    hasGaps,
+    missingEntities,
+    missingQuestions,
+    gapQueries: dedupeQueries(gapQueries).slice(0, 2),
+  };
+}
+
+function hasAnaphoricReference(text: string): boolean {
+  return /\b(their|they|them|both|these|the two|the former|the latter|it|its|that|those)\b/i.test(text);
+}
+
+function stripAnaphoricWords(text: string): string {
+  return text
+    .replace(/\b(?:what\s+about|how\s+about|tell\s+me\s+about|what\s+are)\b/gi, ' ')
+    .replace(/\b(?:their|they|them|both|these|the two|the former|the latter|it|its|that|those)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractKeyKeywords(text: string): string {
+  return text
+    .replace(/[^a-zA-Z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !STOP_WORDS.has(w.toLowerCase()))
+    .slice(0, 5)
+    .join(' ');
 }
 
 function analyzeResearchQuery(query: string): ResearchAnalysis {
@@ -736,4 +883,45 @@ function dedupeQueries(queries: string[]): string[] {
     seen.add(key);
     return true;
   }).map(normalizeQuery);
+}
+
+export function extractConversationContextEntities(messages: Array<{ role: string; content: string; searchResults?: Array<{ title?: string }>; researchTrace?: { plannedEntities?: string[] } }>): string[] {
+  const entities = new Set<string>();
+
+  for (let i = messages.length - 1; i >= 0 && entities.size < 5; i--) {
+    const msg = messages[i];
+    if (msg.role === 'assistant') {
+      if (msg.researchTrace?.plannedEntities) {
+        for (const ent of msg.researchTrace.plannedEntities) {
+          if (ent && ent.trim()) entities.add(ent.trim());
+        }
+      }
+      if (msg.searchResults) {
+        for (const res of msg.searchResults) {
+          if (res.title) {
+            const cleanTitle = res.title.split(/[-–|:•]/)[0]?.trim();
+            if (cleanTitle && cleanTitle.length >= 3 && cleanTitle.length <= 40) {
+              entities.add(cleanTitle);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  for (let i = messages.length - 1; i >= Math.max(0, messages.length - 3) && entities.size < 5; i--) {
+    const content = messages[i].content || '';
+    const matches = content.match(/\b[A-Z][A-Za-z0-9+.-]+(?:\s+[A-Z0-9][A-Za-z0-9+.-]+)*\b/g);
+    if (matches) {
+      for (const m of matches) {
+        const lower = m.toLowerCase();
+        if (!['the', 'this', 'that', 'these', 'those', 'what', 'when', 'where', 'how', 'why', 'who', 'yes', 'no', 'and', 'but', 'can', 'could'].includes(lower) && m.length >= 3) {
+          entities.add(m);
+          if (entities.size >= 5) break;
+        }
+      }
+    }
+  }
+
+  return Array.from(entities).slice(0, 5);
 }

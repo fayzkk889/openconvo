@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), 'utf8');
@@ -203,3 +204,53 @@ if (failures.length > 0) {
 }
 
 console.log(`Launch checks passed (${checkCount} checks).`);
+
+console.log('\nRunning Phase 2A behavioral tests...\n');
+try {
+  execFileSync(process.execPath, ['--loader', './scripts/loader.mjs', 'scripts/behavioral-tests.mjs'], {
+    cwd: root,
+    stdio: 'inherit',
+  });
+} catch {
+  process.exit(1);
+}
+
+console.log('\nRunning Phase 2B behavioral tests...\n');
+try {
+  execFileSync(process.execPath, ['--loader', './scripts/loader.mjs', 'scripts/phase2b-tests.mjs'], {
+    cwd: root,
+    stdio: 'inherit',
+  });
+} catch {
+  process.exit(1);
+}
+
+console.log('\nRunning Phase 3 behavioral tests...\n');
+try {
+  execFileSync(process.execPath, ['--loader', './scripts/loader.mjs', 'scripts/phase3-tests.mjs'], {
+    cwd: root,
+    stdio: 'inherit',
+  });
+} catch {
+  process.exit(1);
+}
+
+console.log('\nRunning Phase 4 behavioral tests...\n');
+try {
+  execFileSync(process.execPath, ['--loader', './scripts/loader.mjs', 'scripts/phase4-tests.mjs'], {
+    cwd: root,
+    stdio: 'inherit',
+  });
+} catch {
+  process.exit(1);
+}
+
+console.log('\nRunning Phase 5 behavioral tests...\n');
+try {
+  execFileSync(process.execPath, ['--loader', './scripts/loader.mjs', 'scripts/phase5-tests.mjs'], {
+    cwd: root,
+    stdio: 'inherit',
+  });
+} catch {
+  process.exit(1);
+}

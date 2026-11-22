@@ -85,8 +85,13 @@ function scoreReliability(stat: ModelReliability | undefined, model: AIModel): n
 
   const samples = stat.successes + stat.failures + stat.rateLimits;
   const successRate = samples > 0 ? stat.successes / samples : 0.5;
-  const rateLimitPenalty = stat.rateLimits * 7;
-  const failurePenalty = stat.failures * 5;
+
+  // Time decay for penalties: decay failure/rate-limit weight if not recent
+  const ageDays = Math.max(0, (Date.now() - stat.lastUsedAt) / (24 * 60 * 60 * 1000));
+  const decayFactor = Math.pow(0.7, Math.min(ageDays, 7)); // Decay older failures over a week
+
+  const rateLimitPenalty = stat.rateLimits * 7 * decayFactor;
+  const failurePenalty = stat.failures * 5 * decayFactor;
   const preferenceBonus = Math.min((stat.preferenceWins || 0) * 8, 24);
   const recencyBonus = Date.now() - stat.lastUsedAt < 7 * 24 * 60 * 60 * 1000 ? 4 : 0;
   const latencyPenalty = stat.successes > 0

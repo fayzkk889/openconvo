@@ -1,8 +1,14 @@
 import type { SearchResultRef } from '@/types/chat';
 import type { SearchResult } from '@/types/search';
+import { safeExternalUrl } from '@/lib/utils';
 
 type FallbackSource = SearchResultRef | SearchResult;
 
+/**
+ * Step 11: Honest Research Degradation
+ * Clearly labels locally constructed fallbacks as degraded.
+ * Displays retrieved evidence accurately without hallucinating conclusions.
+ */
 export function buildResearchFallbackAnswer({
   question,
   sources,
@@ -13,32 +19,40 @@ export function buildResearchFallbackAnswer({
   reason?: string;
 }): string {
   const usefulSources = (sources || [])
-    .filter((source) => source.title && source.url)
-    .slice(0, 6);
+    .filter((source) => source && source.title && source.url)
+    .slice(0, 8);
 
   if (usefulSources.length === 0) {
-    return reason || 'I could not produce a reliable answer from the available sources. Please retry or choose another free model.';
+    return [
+      '> **Research Notice (No Sources Retrieved)**: Web research was attempted, but no usable external sources were returned by search providers. OpenConvo cannot ground this answer in verified evidence.',
+      '',
+      reason ? `**Failure reason:** ${reason}` : '',
+      question ? `**Original question:** ${question}` : '',
+      '',
+      'Please verify your query, check your network connection or search API keys in Settings, or try again shortly.',
+    ].filter(Boolean).join('\n');
   }
 
   const lines = [
-    reason
-      ? `I found web sources, but the model synthesis failed: ${reason}`
-      : 'I found web sources, but the model returned an empty synthesis. Here is a source-backed fallback so you are not left with a dead response.',
+    '> **Research Notice (Degraded Fallback)**: Upstream model synthesis failed or timed out. Below is a structured compilation of the retrieved evidence directly from search providers, presented without model interpretation.',
     '',
-    question ? `**Question:** ${question}` : '**Source-backed fallback**',
+    reason ? `*Synthesis error: ${reason}*` : '',
+    question ? `**Question:** ${question}` : '**Source-backed evidence brief**',
     '',
-    '**Best available sources:**',
+    '**Retrieved sources:**',
   ];
 
   usefulSources.forEach((source, index) => {
+    const safeUrl = safeExternalUrl(source.url) || source.url;
     const snippet = cleanSnippet(source.content || source.snippet || '');
-    lines.push(`${index + 1}. [${source.title}](${source.url})${snippet ? ` - ${snippet}` : ''}`);
+    const qualityLabel = source.sourceLabel ? ` (${source.sourceLabel})` : '';
+    lines.push(`${index + 1}. [${source.title}](${safeUrl})${qualityLabel}${snippet ? `\n   > ${snippet}` : ''}`);
   });
 
   lines.push(
     '',
-    '**What this means:**',
-    'The app successfully reached web research, but the selected free model/provider did not return a usable final answer. Use the sources above for the latest details, or press Retry to ask another free model to synthesize them.'
+    '**Status Note:**',
+    'OpenConvo successfully retrieved the web sources above, but the selected model could not synthesize a grounded answer. You can consult the source links directly or click "Retry" to attempt synthesis with another free model.'
   );
 
   return lines.join('\n');
@@ -48,5 +62,5 @@ function cleanSnippet(value: string): string {
   return value
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 260);
+    .slice(0, 300);
 }

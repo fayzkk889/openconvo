@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useCallback, useState } from 'react';
-import { Paperclip, X } from 'lucide-react';
+import { Paperclip, X, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -68,8 +68,13 @@ export function FileUpload({ attachments, onAttach, onRemove }: FileUploadProps)
                 {attachment.name}
               </span>
               <span className="text-[var(--color-text-tertiary)]">
-                ({formatFileSize(attachment.size)})
+                ({formatFileSize(attachment.size)}{attachment.pageCount ? ` • ${attachment.pageCount}p` : ''})
               </span>
+              {attachment.warning && (
+                <span title={attachment.warning} className="inline-flex items-center">
+                  <AlertTriangle className="h-3 w-3 text-[var(--color-warning)]" />
+                </span>
+              )}
               <button
                 onClick={() => onRemove(attachment.id)}
                 className="ml-0.5 rounded p-0.5 text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)] hover:bg-[var(--color-bg-hover)] transition-colors"

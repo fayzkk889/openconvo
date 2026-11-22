@@ -115,6 +115,43 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   const needsTrendEvidence = /\b(twitter|x\.com|reddit|instagram|youtube|tiktok|social media|trending|trends|viral|hot topics?|hashtags?)\b/.test(lowerQuery);
   const wantsDefinition = /\b(define|definition|meaning|synonym|what does|what is the meaning)\b/.test(lowerQuery);
   const looksLikeComparisonContent = /\b(vs|versus|benchmark|benchmarks|compared|wins?|showdown)\b/.test(haystack);
+  const needsFreshness = /\b(latest|recent|new|newest|today|currently|now|2024|2025|2026|update|updated)\b/i.test(query);
+
+  if (needsFreshness && result.publishedAt) {
+    const pubDate = new Date(result.publishedAt);
+    if (!Number.isNaN(pubDate.getTime())) {
+      const now = Date.now();
+      const ageMs = now - pubDate.getTime();
+      const ageDays = ageMs / (1000 * 60 * 60 * 24);
+
+      if (ageDays >= 0 && ageDays <= 30) {
+        score += 20;
+        reasons.push('published in last 30 days');
+      } else if (ageDays > 30 && ageDays <= 180) {
+        score += 15;
+        reasons.push('published in last 6 months');
+      } else if (ageDays > 180 && ageDays <= 365) {
+        score += 10;
+        reasons.push('published in past year');
+      } else if (ageDays > 730) {
+        score -= 10;
+        reasons.push('dated publication older than 2 years for fresh query');
+      } else {
+        score += 5;
+        reasons.push('dated publication');
+      }
+
+      // Check if query mentions a specific year and publication year matches
+      const yearMatch = query.match(/\b(202[0-9])\b/);
+      if (yearMatch && pubDate.getFullYear() === Number(yearMatch[1])) {
+        score += 10;
+        reasons.push(`matches requested year ${yearMatch[1]}`);
+      }
+    } else {
+      score += 5;
+      reasons.push('unparseable date string');
+    }
+  }
 
   if (isPrimaryHost) {
     score += 18;
@@ -235,4 +272,48 @@ function safeUrl(value: string): URL | null {
   } catch {
     return null;
   }
+}
+
+export interface ConflictingEvidenceReport {
+  hasConflict: boolean;
+  conflictingTopics: string[];
+  summary?: string;
+}
+
+export function detectConflictingEvidence(results: SearchResult[]): ConflictingEvidenceReport {
+  if (!results || results.length < 2) {
+    return { hasConflict: false, conflictingTopics: [] };
+  }
+
+  const conflictingTopics: string[] = [];
+  const texts = results.map((r) => `${r.title} ${r.snippet || ''} ${r.content || ''}`.toLowerCase());
+
+  // Check 1: Release / status divergence (e.g. released/launched vs delayed/cancelled)
+  const hasReleased = texts.some((t) => /\b(is released|has launched|now available|out now)\b/.test(t));
+  const hasDelayed = texts.some((t) => /\b(delayed|postponed|not yet released|cancelled|pushed back)\b/.test(t));
+  if (hasReleased && hasDelayed) {
+    conflictingTopics.push('availability / release timing');
+  }
+
+  // Check 2: Pricing divergence (e.g. free vs paid / price discrepancy)
+  const hasFree = texts.some((t) => /\b(100% free|completely free|free tier available|no cost)\b/.test(t));
+  const hasPaidOnly = texts.some((t) => /\b(requires paid subscription|no free version|paid only|\$\d+\/month)\b/.test(t));
+  if (hasFree && hasPaidOnly) {
+    conflictingTopics.push('pricing model');
+  }
+
+  // Check 3: Factual outcome / winner divergence
+  const hasWon = texts.some((t) => /\b(won|victorious|champion|defeated)\b/.test(t));
+  const hasLost = texts.some((t) => /\b(lost to|eliminated by|runner-up)\b/.test(t));
+  if (hasWon && hasLost && texts.length >= 2) {
+    conflictingTopics.push('event / match outcome');
+  }
+
+  return {
+    hasConflict: conflictingTopics.length > 0,
+    conflictingTopics,
+    summary: conflictingTopics.length > 0
+      ? `Sources contain conflicting evidence regarding: ${conflictingTopics.join(', ')}`
+      : undefined,
+  };
 }

@@ -1,12 +1,16 @@
 import { NextRequest } from 'next/server';
 import { streamChat, generateTitle, ChatMessage, OpenRouterError, formatOpenRouterError } from '@/lib/openrouter';
-import { FALLBACK_CHAIN, isFreeModelId } from '@/lib/models';
+import { FALLBACK_CHAIN, isFreeModelId, getModelById } from '@/lib/models';
 import { buildSystemPrompt } from '@/lib/prompts';
 import { SearchResult } from '@/types/search';
-import { Attachment, TaskType } from '@/types/chat';
+import { Attachment, TaskType, StreamingChatEvent, TokenUsage } from '@/types/chat';
+import { DocumentExcerpt } from '@/types/document';
 import { normalizeTaskType } from '@/lib/tasks';
 import { buildResearchFallbackAnswer } from '@/lib/research-fallback';
-import { ensureResearchCitations } from '@/lib/research-citations';
+import { ensureResearchCitations, buildSourcesAppendixIfMissing } from '@/lib/research-citations';
+import { buildDocumentAppendixIfMissing } from '@/lib/document-citations';
+import { selectBoundedContext } from '@/lib/context-usage';
+import { SseChunkParser, parseOpenRouterPayload } from '@/lib/sse-parser';
 
 export const maxDuration = 60;
 
@@ -15,10 +19,15 @@ const MAX_MESSAGE_CHARS = 50000;
 const MAX_CONTEXT_ITEMS = 10;
 const MAX_SEARCH_CONTENT_CHARS = 2500;
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 30 * 1000;
-const CHAT_STREAM_IDLE_TIMEOUT_MS = 25 * 1000;
+
+// Bounded deadlines and timeouts (Step 4)
+const REQUEST_ABSOLUTE_DEADLINE_MS = 52 * 1000;
+const MAX_MODEL_ATTEMPTS = 3;
+const ATTEMPT_CONNECT_TIMEOUT_MS = 10 * 1000;
+const CHAT_STREAM_IDLE_TIMEOUT_MS = 15 * 1000;
 
 const modelCooldowns = new Map<string, number>();
-const hostedUsage = new Map<string, { count: number; resetAt: number }>();
+const hostedUsage = new Map<string, { count: number; resetAt: number; inFlight: number }>();
 type UsageMode = 'byok' | 'hosted-free';
 type HostedQuota = {
   allowed: boolean;
@@ -30,15 +39,36 @@ type HostedQuota = {
 };
 
 export async function POST(request: NextRequest) {
+  let reservedQuota: HostedQuota | null = null;
+  let quotaFinalized = false;
+
   try {
+    const contentLength = request.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > 2 * 1024 * 1024) {
+      return Response.json({ error: 'Request body exceeds 2MB limit' }, { status: 413 });
+    }
+
+    const rawBody = await request.text();
+    if (rawBody.length > 2 * 1024 * 1024) {
+      return Response.json({ error: 'Request body exceeds 2MB limit' }, { status: 413 });
+    }
+
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(rawBody);
+    } catch {
+      return Response.json({ error: 'Invalid JSON request body' }, { status: 400 });
+    }
+
     const key = getClientOpenRouterKey(request);
-    const body = validateChatBody(await request.json());
+    const body = validateChatBody(parsedJson);
     const {
-      messages,
+      rawMessages,
       model,
       systemPrompt,
       searchResults,
       attachments,
+      documentExcerpts,
       researchMode,
       agentMode,
       taskType,
@@ -56,7 +86,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const hostedQuota = getHostedQuotaStatus(request, key);
+    const hostedQuota = reserveHostedQuota(request, key);
+    reservedQuota = hostedQuota;
+
     if (!hostedQuota.allowed) {
       return Response.json(
         {
@@ -73,235 +105,425 @@ export async function POST(request: NextRequest) {
 
     // Title generation (non-streaming)
     if (generateTitleFor) {
-      const title = await generateTitle(messages, key, model);
-      const usage = commitHostedQuota(hostedQuota);
-      return Response.json(
-        { title, hostedUsage: publicHostedUsage(usage) },
-        { headers: usageHeaders(usage.mode, usage) }
-      );
+      try {
+        const messages = selectBoundedContext(rawMessages, MAX_MESSAGES, MAX_MESSAGE_CHARS);
+        const title = await generateTitle(messages, key, model);
+        const usage = commitHostedQuota(hostedQuota);
+        quotaFinalized = true;
+        return Response.json(
+          { title, hostedUsage: publicHostedUsage(usage) },
+          { headers: usageHeaders(usage.mode, usage) }
+        );
+      } catch (err) {
+        if (!quotaFinalized && reservedQuota) {
+          releaseHostedQuota(reservedQuota);
+          quotaFinalized = true;
+        }
+        throw err;
+      }
     }
 
-    // Try the selected model, then fallback chain
+    // Try the selected model, then fallback chain (bounded to free models only)
     const modelsToTry = uniqueFreeModels([
       model,
       ...availableModels,
       ...FALLBACK_CHAIN,
     ]);
-    let lastError: Error | null = null;
-    let usedModel = model;
-    const failedModels: string[] = [];
-    const rateLimitedModels: string[] = [];
-    const providerRateLimits = new Map<string, number>();
-    const skippedModels = modelsToTry.filter((tryModel) => isModelCoolingDown(tryModel));
-    let retryAfterSeconds: number | undefined;
 
-    for (const tryModel of modelsToTry) {
-      if (isModelCoolingDown(tryModel)) {
-        continue;
-      }
+    const requestId = 'req_' + Math.random().toString(36).slice(2, 10);
+    const encoder = new TextEncoder();
+    const overallDeadline = Date.now() + REQUEST_ABSOLUTE_DEADLINE_MS;
 
-      try {
-        const fullSystemPrompt = buildSystemPrompt({
-          customPrompt: systemPrompt,
-          activeModel: tryModel,
-          researchMode,
-          agentMode,
-          taskType,
-          searchResults,
-          attachments,
-        });
+    const stream = new ReadableStream({
+      async start(controller) {
+        let quotaCommitted = false;
+        const commitQuotaOnce = () => {
+          if (!quotaCommitted) {
+            quotaCommitted = true;
+            quotaFinalized = true;
+            commitHostedQuota(hostedQuota);
+          }
+        };
 
-        const response = await streamChat(messages, tryModel, fullSystemPrompt, key);
+        const releaseQuotaIfUncommitted = () => {
+          if (!quotaCommitted && !quotaFinalized) {
+            quotaFinalized = true;
+            releaseHostedQuota(hostedQuota);
+          }
+        };
 
-        if (!response.body) {
-          throw new Error('No response body');
-        }
+        try {
+          const emitEvent = (event: StreamingChatEvent) => {
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          } catch {
+            // Controller might be closed
+          }
+        };
 
-        usedModel = tryModel;
-        const usage = commitHostedQuota(hostedQuota);
+        let lastError: Error | null = null;
+        let usedModel = model;
+        const failedModels: string[] = [];
+        const rateLimitedModels: string[] = [];
+        const providerRateLimits = new Map<string, number>();
+        let retryAfterSeconds: number | undefined;
+        let attemptsCount = 0;
 
-        // Transform the SSE stream to extract content deltas
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
+        for (let i = 0; i < modelsToTry.length; i++) {
+          const tryModel = modelsToTry[i];
 
-        const stream = new ReadableStream({
-          async start(controller) {
-            let buffer = '';
-            let emittedContent = '';
-            let controllerErrored = false;
-            const encoder = new TextEncoder();
-            if (failedModels.length > 0 || rateLimitedModels.length > 0) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                model: usedModel,
-                failedModels,
-                rateLimitedModels,
-                retryAfterSeconds,
-              })}\n\n`));
+          // Check overall request deadline budget
+          const remainingDeadlineMs = overallDeadline - Date.now();
+          if (remainingDeadlineMs <= 5000) {
+            lastError = new Error('Overall request time limit reached before connecting to a responsive model');
+            break;
+          }
+
+          // Enforce maximum candidate attempts
+          if (attemptsCount >= MAX_MODEL_ATTEMPTS) {
+            break;
+          }
+
+          if (isModelCoolingDown(tryModel)) {
+            continue;
+          }
+
+          attemptsCount++;
+          usedModel = tryModel;
+
+          // Step 7: Context budgeting for this candidate model's context window
+          const candidateModelMeta = getModelById(tryModel);
+          const candidateContextLimit = candidateModelMeta?.contextLength || 32768;
+          const candidateMessages = selectBoundedContext(
+            rawMessages,
+            MAX_MESSAGES,
+            MAX_MESSAGE_CHARS,
+            candidateContextLimit
+          );
+
+          try {
+            const fullSystemPrompt = buildSystemPrompt({
+              customPrompt: systemPrompt,
+              activeModel: tryModel,
+              researchMode,
+              agentMode,
+              taskType,
+              searchResults,
+              attachments,
+              documentExcerpts,
+            });
+
+            const connectTimeoutMs = Math.min(ATTEMPT_CONNECT_TIMEOUT_MS, remainingDeadlineMs);
+
+            // Step 9: Pass downstream client cancellation signal
+            const response = await streamChat(
+              candidateMessages,
+              tryModel,
+              fullSystemPrompt,
+              key,
+              request.signal,
+              connectTimeoutMs
+            );
+
+            if (!response.body) {
+              throw new Error('No response body from OpenRouter');
             }
-            const emitSseLine = (line: string) => {
-              const trimmed = line.trim();
-              if (!trimmed || !trimmed.startsWith('data: ')) return;
-              const data = trimmed.slice(6);
-              if (data === '[DONE]') return;
 
-              try {
-                const parsed = JSON.parse(data);
-                const content = parsed.choices?.[0]?.delta?.content;
-                if (content) {
-                  emittedContent += content;
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content, model: usedModel })}\n\n`));
-                }
-              } catch {
-                // skip malformed chunks
-              }
-            };
+            // Connection succeeded: emit meta event
+            emitEvent({
+              type: 'meta',
+              requestId,
+              model: usedModel,
+              mode: hostedQuota.mode,
+            });
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            const sseParser = new SseChunkParser();
+            let emittedContent = '';
+            let finishReason: string | undefined;
+            let usage: TokenUsage | undefined;
+            let streamSuccess = false;
 
             try {
               while (true) {
-                const { done, value } = await readStreamChunkWithTimeout(reader, CHAT_STREAM_IDLE_TIMEOUT_MS);
+                // Check overall deadline budget
+                const chunkBudgetMs = Math.min(
+                  CHAT_STREAM_IDLE_TIMEOUT_MS,
+                  Math.max(overallDeadline - Date.now(), 1000)
+                );
+
+                const { done, value } = await readStreamChunkWithTimeout(
+                  reader,
+                  chunkBudgetMs,
+                  request.signal
+                );
                 if (done) break;
 
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
+                const textChunk = decoder.decode(value, { stream: true });
+                const events = sseParser.feed(textChunk);
 
-                for (const line of lines) {
-                  emitSseLine(line);
+                for (const rawPayload of events) {
+                  const parsed = parseOpenRouterPayload(rawPayload);
+                  if (!parsed) continue;
+
+                  if (parsed.isDone) {
+                    streamSuccess = true;
+                    break;
+                  }
+
+                  if (parsed.finishReason) {
+                    finishReason = parsed.finishReason;
+                  }
+                  if (parsed.usage) {
+                    usage = parsed.usage;
+                  }
+
+                  if (parsed.content) {
+                    emittedContent += parsed.content;
+                    emitEvent({
+                      type: 'delta',
+                      content: parsed.content,
+                      model: usedModel,
+                    });
+                  }
+                }
+
+                if (streamSuccess) break;
+              }
+
+              // Flush parser remainder
+              const flushed = sseParser.flush();
+              for (const rawPayload of flushed) {
+                const parsed = parseOpenRouterPayload(rawPayload);
+                if (parsed?.content) {
+                  emittedContent += parsed.content;
+                  emitEvent({
+                    type: 'delta',
+                    content: parsed.content,
+                    model: usedModel,
+                  });
+                }
+                if (parsed?.finishReason) {
+                  finishReason = parsed.finishReason;
                 }
               }
-              buffer += decoder.decode();
-              if (buffer.trim()) {
-                emitSseLine(buffer);
-              }
+
+              // Post-processing for research citations
               if (emittedContent.trim() && researchMode && searchResults?.length) {
-                const finalContent = ensureResearchCitations(emittedContent, searchResults);
-                const citationTail = finalContent.slice(emittedContent.trim().length);
-                if (citationTail.trim()) {
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: citationTail, model: usedModel, citations: true })}\n\n`));
+                const citationTail = buildSourcesAppendixIfMissing(emittedContent, searchResults);
+                if (citationTail) {
+                  emittedContent += citationTail;
+                  emitEvent({
+                    type: 'delta',
+                    content: citationTail,
+                    model: usedModel,
+                  });
                 }
               }
-              if (!emittedContent.trim() && researchMode && searchResults?.length) {
-                const fallback = buildResearchFallbackAnswer({
-                  question: lastUserQuestion(messages),
-                  sources: searchResults,
-                  reason: 'the selected free model returned an empty response',
-                });
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: fallback, model: usedModel, fallback: true })}\n\n`));
+
+              // Post-processing for document sources
+              if (emittedContent.trim() && documentExcerpts?.length) {
+                const docAppendix = buildDocumentAppendixIfMissing(emittedContent, documentExcerpts);
+                if (docAppendix) {
+                  emittedContent += docAppendix;
+                  emitEvent({
+                    type: 'delta',
+                    content: docAppendix,
+                    model: usedModel,
+                  });
+                }
               }
-            } catch (err) {
+
+              // Check if response was empty
+              if (!emittedContent.trim()) {
+                throw new Error('Model returned an empty response');
+              }
+
+              // Verified completion!
+              commitQuotaOnce();
+              emitEvent({
+                type: 'complete',
+                model: usedModel,
+                finishReason: finishReason || 'stop',
+                usage,
+              });
+
+              controller.close();
+              return;
+            } catch (streamError) {
               await reader.cancel().catch(() => undefined);
-              if (researchMode && searchResults?.length) {
-                const fallback = buildResearchFallbackAnswer({
-                  question: lastUserQuestion(messages),
-                  sources: searchResults,
-                  reason: emittedContent.trim()
-                    ? 'the selected free model stopped streaming before it finished'
-                    : 'the selected free model did not stream a response in time',
+
+              // Step 4 Invariant: Mid-stream failure enforcement
+              // If content has already been emitted, DO NOT fall back to another model!
+              if (emittedContent.trim().length > 0) {
+                const errMessage = (streamError as Error).message || 'Stream interrupted';
+                if (emittedContent.trim().length >= 20) {
+                  commitQuotaOnce();
+                }
+                emitEvent({
+                  type: 'interrupted',
+                  model: usedModel,
+                  partialContent: emittedContent,
+                  reason: errMessage,
+                  finishReason: 'interrupted',
                 });
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: emittedContent.trim() ? `\n\n${fallback}` : fallback, model: usedModel, fallback: true })}\n\n`));
-              } else {
-                controllerErrored = true;
-                controller.error(err);
+                controller.close();
+                return;
               }
+
+              // If stream failed BEFORE emitting content, rethrow to trigger model fallback
+              throw streamError;
             } finally {
               try {
                 reader.releaseLock();
               } catch {
-                // The upstream reader may already be released/cancelled after a timeout.
-              }
-              if (!controllerErrored) {
-                controller.close();
+                // Ignore lock release error
               }
             }
-          },
-        });
+          } catch (modelError) {
+            lastError = modelError as Error;
+            failedModels.push(tryModel);
 
-        return new Response(stream, {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'X-Model-Used': usedModel,
-            ...usageHeaders(usage.mode, usage),
-          },
-        });
-      } catch (err) {
-        lastError = err as Error;
-        failedModels.push(tryModel);
-        if (err instanceof OpenRouterError && err.status === 429) {
-          rateLimitedModels.push(tryModel);
-          retryAfterSeconds = err.retryAfterSeconds || retryAfterSeconds;
-          rememberModelCooldown(tryModel, err);
-          console.warn(`Model ${tryModel} rate-limited; trying fallback.`);
-          if (err.providerName) {
-            const providerHits = (providerRateLimits.get(err.providerName) || 0) + 1;
-            providerRateLimits.set(err.providerName, providerHits);
-            if (providerHits >= 2) {
-              break;
+            if (modelError instanceof OpenRouterError && modelError.status === 429) {
+              rateLimitedModels.push(tryModel);
+              retryAfterSeconds = modelError.retryAfterSeconds || retryAfterSeconds;
+              rememberModelCooldown(tryModel, modelError);
+              if (modelError.providerName) {
+                const hits = (providerRateLimits.get(modelError.providerName) || 0) + 1;
+                providerRateLimits.set(modelError.providerName, hits);
+                if (hits >= 2) break; // Don't pound the same provider
+              }
+            } else if (modelError instanceof OpenRouterError && isOpenRouterAuthError(modelError)) {
+              break; // Auth error won't be resolved by fallback
+            }
+
+            // If another candidate exists within deadline and attempt budget, notify client of fallback
+            const nextCandidate = modelsToTry
+              .slice(i + 1)
+              .find((m) => !isModelCoolingDown(m));
+            if (nextCandidate && attemptsCount < MAX_MODEL_ATTEMPTS && overallDeadline - Date.now() > 5000) {
+              emitEvent({
+                type: 'fallback',
+                fromModel: tryModel,
+                toModel: nextCandidate,
+                reason: (modelError as Error).message || 'Provider failed',
+                rateLimitedModels,
+                retryAfterSeconds,
+              });
             }
           }
-        } else if (err instanceof OpenRouterError && isOpenRouterAuthError(err)) {
-          console.warn('OpenRouter authentication failed; not trying fallback models.');
-          break;
-        } else {
-          console.error(`Model ${tryModel} failed:`, err);
         }
-        continue;
-      }
-    }
 
-    // All models failed
-    return Response.json(
-      {
-        error: formatChatFailure(lastError, failedModels, skippedModels),
-        rateLimitedModels,
-        retryAfterSeconds: lastError instanceof OpenRouterError ? lastError.retryAfterSeconds : undefined,
-        hostedUsage: publicHostedUsage(hostedQuota),
+        // All attempts failed
+        if (researchMode && searchResults?.length) {
+          commitQuotaOnce();
+          const fallbackAnswer = buildResearchFallbackAnswer({
+            question: lastUserQuestion(rawMessages),
+            sources: searchResults,
+            reason: lastError?.message || 'the selected free model did not stream a response in time',
+          });
+          emitEvent({
+            type: 'research_fallback',
+            content: fallbackAnswer,
+            model: usedModel,
+            reason: lastError?.message || 'Inference failed across candidate models',
+          });
+        } else {
+          emitEvent({
+            type: 'error',
+            error: formatChatFailure(lastError, failedModels, []),
+            model: usedModel,
+            failedModels,
+            rateLimitedModels,
+            retryAfterSeconds,
+          });
+        }
+
+        controller.close();
+        } finally {
+          releaseQuotaIfUncommitted();
+        }
       },
-      {
-        status: 502,
-        headers: usageHeaders(hostedQuota.mode, hostedQuota),
-      }
-    );
+      cancel() {
+        if (!quotaFinalized) {
+          quotaFinalized = true;
+          releaseHostedQuota(hostedQuota);
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Model-Used': model,
+        ...usageHeaders(hostedQuota.mode, hostedQuota),
+      },
+    });
   } catch (error) {
+    if (reservedQuota && !quotaFinalized) {
+      releaseHostedQuota(reservedQuota);
+      quotaFinalized = true;
+    }
     console.error('Chat API error:', error);
     const message = error instanceof Error ? error.message : 'Internal server error';
     const status = isValidationError(message) ? 400 : 500;
-    return Response.json(
-      { error: message },
-      { status }
-    );
+    return Response.json({ error: message }, { status });
   }
 }
 
 async function readStreamChunkWithTimeout(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-  timeoutMs: number
+  timeoutMs: number,
+  abortSignal?: AbortSignal
 ): Promise<ReadableStreamReadResult<Uint8Array>> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+
   try {
     return await Promise.race([
       reader.read(),
       new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
-        timeout = setTimeout(() => reject(new Error('Chat stream timed out waiting for model output')), timeoutMs);
+        timeout = setTimeout(
+          () => reject(new Error('Chat stream timed out waiting for model output')),
+          timeoutMs
+        );
+        if (abortSignal) {
+          onAbort = () => reject(new Error('User cancelled request'));
+          abortSignal.addEventListener('abort', onAbort, { once: true });
+        }
       }),
     ]);
   } finally {
     if (timeout) clearTimeout(timeout);
+    if (abortSignal && onAbort) {
+      abortSignal.removeEventListener('abort', onAbort);
+    }
   }
 }
 
-function lastUserQuestion(messages: ChatMessage[]): string {
-  return [...messages].reverse().find((message) => message.role === 'user')?.content || '';
+function lastUserQuestion(messages: unknown[]): string {
+  if (!Array.isArray(messages)) return '';
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const item = messages[i] as Record<string, unknown> | null;
+    if (item && item.role === 'user' && typeof item.content === 'string') {
+      return item.content;
+    }
+  }
+  return '';
 }
 
 function formatChatFailure(error: Error | null, failedModels: string[], skippedModels: string[]): string {
-  const attemptedText = failedModels.length > 1
-    ? ` OpenConvo tried ${failedModels.length} free models before giving up.`
-    : '';
-  const skippedText = skippedModels.length > 0
-    ? ` ${skippedModels.length} temporarily rate-limited model${skippedModels.length === 1 ? ' was' : 's were'} skipped.`
-    : '';
+  const attemptedText =
+    failedModels.length > 1
+      ? ` OpenConvo tried ${failedModels.length} free models before giving up.`
+      : '';
+  const skippedText =
+    skippedModels.length > 0
+      ? ` ${skippedModels.length} temporarily rate-limited model${skippedModels.length === 1 ? ' was' : 's were'} skipped.`
+      : '';
   if (error instanceof OpenRouterError) {
     return `${formatOpenRouterError(error)}${attemptedText}${skippedText}`;
   }
@@ -359,11 +581,9 @@ function getHostedQuotaStatus(request: NextRequest, clientKey: string | null): H
   const now = Date.now();
   const resetAt = getNextUtcMidnight(now);
   const existing = hostedUsage.get(identity);
-  const entry = existing && existing.resetAt > now
-    ? existing
-    : { count: 0, resetAt };
+  const entry = existing && existing.resetAt > now ? existing : { count: 0, resetAt, inFlight: 0 };
 
-  if (entry.count >= limit) {
+  if (entry.count + entry.inFlight >= limit) {
     hostedUsage.set(identity, entry);
     return {
       allowed: false,
@@ -375,6 +595,7 @@ function getHostedQuotaStatus(request: NextRequest, clientKey: string | null): H
     };
   }
 
+  entry.inFlight += 1;
   hostedUsage.set(identity, entry);
   pruneHostedUsage(now);
 
@@ -382,10 +603,20 @@ function getHostedQuotaStatus(request: NextRequest, clientKey: string | null): H
     allowed: true,
     mode: 'hosted-free',
     limit,
-    remaining: Math.max(limit - entry.count, 0),
+    remaining: Math.max(limit - (entry.count + entry.inFlight), 0),
     resetAt: entry.resetAt,
     identity,
   };
+}
+
+const reserveHostedQuota = getHostedQuotaStatus;
+
+function releaseHostedQuota(quota: HostedQuota): void {
+  if (quota.mode === 'byok' || !quota.identity) return;
+  const existing = hostedUsage.get(quota.identity);
+  if (existing && existing.inFlight > 0) {
+    existing.inFlight -= 1;
+  }
 }
 
 function commitHostedQuota(quota: HostedQuota): HostedQuota {
@@ -393,9 +624,13 @@ function commitHostedQuota(quota: HostedQuota): HostedQuota {
 
   const now = Date.now();
   const existing = hostedUsage.get(quota.identity);
-  const entry = existing && existing.resetAt > now
-    ? existing
-    : { count: 0, resetAt: getNextUtcMidnight(now) };
+  const entry =
+    existing && existing.resetAt > now
+      ? existing
+      : { count: 0, resetAt: getNextUtcMidnight(now), inFlight: 1 };
+  if (entry.inFlight > 0) {
+    entry.inFlight -= 1;
+  }
   entry.count += 1;
   hostedUsage.set(quota.identity, entry);
 
@@ -418,7 +653,10 @@ function publicHostedUsage(quota: HostedQuota): Omit<HostedQuota, 'identity'> | 
   };
 }
 
-function usageHeaders(mode: UsageMode, usage: { limit: number; remaining: number; resetAt: number }): Record<string, string> {
+function usageHeaders(
+  mode: UsageMode,
+  usage: { limit: number; remaining: number; resetAt: number }
+): Record<string, string> {
   if (mode === 'byok') {
     return {
       'X-OpenConvo-Mode': 'byok',
@@ -459,11 +697,12 @@ function pruneHostedUsage(now: number): void {
 }
 
 function validateChatBody(body: unknown): {
-  messages: ChatMessage[];
+  rawMessages: unknown[];
   model: string;
   systemPrompt?: string;
   searchResults?: SearchResult[];
   attachments?: Attachment[];
+  documentExcerpts?: DocumentExcerpt[];
   researchMode?: boolean;
   agentMode?: boolean;
   taskType?: TaskType;
@@ -479,33 +718,22 @@ function validateChatBody(body: unknown): {
     throw new Error('Messages are required');
   }
 
-  const messages = candidate.messages.slice(0, MAX_MESSAGES).map((message) => {
-    if (!message || typeof message !== 'object') {
-      throw new Error('Invalid message');
-    }
-    const msg = message as Record<string, unknown>;
-    if (!['user', 'assistant', 'system'].includes(String(msg.role)) || typeof msg.content !== 'string') {
-      throw new Error('Invalid message');
-    }
-    return {
-      role: msg.role as ChatMessage['role'],
-      content: msg.content.slice(0, MAX_MESSAGE_CHARS),
-    };
-  });
-
-  const model = typeof candidate.model === 'string' && candidate.model.trim()
-    ? candidate.model.trim()
-    : FALLBACK_CHAIN[0];
+  const model =
+    typeof candidate.model === 'string' && candidate.model.trim()
+      ? candidate.model.trim()
+      : FALLBACK_CHAIN[0];
   const safeModel = isFreeModelId(model) ? model : FALLBACK_CHAIN[0];
 
   return {
-    messages,
+    rawMessages: candidate.messages,
     model: safeModel,
-    systemPrompt: typeof candidate.systemPrompt === 'string'
-      ? candidate.systemPrompt.slice(0, 10000)
-      : undefined,
+    systemPrompt:
+      typeof candidate.systemPrompt === 'string'
+        ? candidate.systemPrompt.slice(0, 10000)
+        : undefined,
     searchResults: normalizeSearchResults(candidate.searchResults),
     attachments: normalizeAttachments(candidate.attachments),
+    documentExcerpts: normalizeDocumentExcerpts(candidate.documentExcerpts),
     researchMode: candidate.researchMode === true,
     agentMode: candidate.agentMode === true,
     taskType: normalizeTaskType(candidate.taskType),
@@ -533,17 +761,26 @@ function normalizeSearchResults(value: unknown): SearchResult[] | undefined {
     if (!item || typeof item !== 'object') return [];
     const result = item as Record<string, unknown>;
     if (typeof result.title !== 'string' || typeof result.url !== 'string') return [];
-    return [{
-      title: result.title.slice(0, 200),
-      url: result.url.slice(0, 1000),
-      snippet: typeof result.snippet === 'string' ? result.snippet.slice(0, 1000) : '',
-      content: typeof result.content === 'string' ? result.content.slice(0, MAX_SEARCH_CONTENT_CHARS) : undefined,
-      extracted: typeof result.extracted === 'boolean' ? result.extracted : undefined,
-      fetchedAt: typeof result.fetchedAt === 'number' ? result.fetchedAt : undefined,
-      sourceScore: typeof result.sourceScore === 'number' ? Math.max(0, Math.min(100, Math.floor(result.sourceScore))) : undefined,
-      sourceLabel: typeof result.sourceLabel === 'string' ? result.sourceLabel.slice(0, 40) : undefined,
-      sourceReason: typeof result.sourceReason === 'string' ? result.sourceReason.slice(0, 200) : undefined,
-    }];
+    return [
+      {
+        title: result.title.slice(0, 200),
+        url: result.url.slice(0, 1000),
+        snippet: typeof result.snippet === 'string' ? result.snippet.slice(0, 1000) : '',
+        content:
+          typeof result.content === 'string'
+            ? result.content.slice(0, MAX_SEARCH_CONTENT_CHARS)
+            : undefined,
+        extracted: typeof result.extracted === 'boolean' ? result.extracted : undefined,
+        fetchedAt: typeof result.fetchedAt === 'number' ? result.fetchedAt : undefined,
+        sourceScore:
+          typeof result.sourceScore === 'number'
+            ? Math.max(0, Math.min(100, Math.floor(result.sourceScore)))
+            : undefined,
+        sourceLabel: typeof result.sourceLabel === 'string' ? result.sourceLabel.slice(0, 40) : undefined,
+        sourceReason:
+          typeof result.sourceReason === 'string' ? result.sourceReason.slice(0, 200) : undefined,
+      },
+    ];
   });
 }
 
@@ -561,12 +798,49 @@ function normalizeAttachments(value: unknown): Attachment[] | undefined {
     ) {
       return [];
     }
-    return [{
-      id: attachment.id,
-      name: attachment.name.slice(0, 255),
-      type: attachment.type.slice(0, 100),
-      size: attachment.size,
-      content: attachment.content.slice(0, 50000),
-    }];
+    return [
+      {
+        id: attachment.id,
+        name: attachment.name.slice(0, 255),
+        type: attachment.type.slice(0, 100),
+        size: attachment.size,
+        content: attachment.content.slice(0, 50000),
+      },
+    ];
   });
+}
+
+function normalizeDocumentExcerpts(value: unknown): DocumentExcerpt[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const excerpts = value.slice(0, 15).flatMap((item): DocumentExcerpt[] => {
+    if (!item || typeof item !== 'object') return [];
+    const exc = item as Record<string, unknown>;
+    if (
+      typeof exc.chunkId !== 'string' ||
+      typeof exc.documentId !== 'string' ||
+      typeof exc.docIndex !== 'number' ||
+      typeof exc.filename !== 'string' ||
+      typeof exc.citationId !== 'string' ||
+      typeof exc.text !== 'string' ||
+      typeof exc.score !== 'number'
+    ) {
+      return [];
+    }
+    return [
+      {
+        chunkId: exc.chunkId.slice(0, 100),
+        documentId: exc.documentId.slice(0, 100),
+        docIndex: Math.max(1, Math.floor(exc.docIndex)),
+        filename: exc.filename.slice(0, 255),
+        citationId: exc.citationId.slice(0, 50),
+        text: exc.text.slice(0, 8000),
+        score: exc.score,
+        pageNumber: typeof exc.pageNumber === 'number' ? Math.max(1, Math.floor(exc.pageNumber)) : undefined,
+        startLine: typeof exc.startLine === 'number' ? Math.max(1, Math.floor(exc.startLine)) : undefined,
+        endLine: typeof exc.endLine === 'number' ? Math.max(1, Math.floor(exc.endLine)) : undefined,
+        sectionHeading: typeof exc.sectionHeading === 'string' ? exc.sectionHeading.slice(0, 200) : undefined,
+      },
+    ];
+  });
+  return excerpts.length > 0 ? excerpts : undefined;
 }

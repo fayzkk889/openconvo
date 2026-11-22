@@ -6,11 +6,35 @@ import { CURATED_FREE_MODELS, DEFAULT_MODEL_ID, resolveSafeModelId } from '@/lib
 
 const STORAGE_KEY = 'openconvo-selected-model';
 const COOLDOWN_STORAGE_KEY = 'openconvo-model-cooldowns';
+const CATALOG_STORAGE_KEY = 'openconvo-cached-models';
 
 type CooldownMap = Record<string, number>;
 
+function readCachedCatalog(): AIModel[] {
+  try {
+    const raw = localStorage.getItem(CATALOG_STORAGE_KEY);
+    if (!raw) return CURATED_FREE_MODELS;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return CURATED_FREE_MODELS;
+    const valid = parsed.filter(
+      (m): m is AIModel =>
+        Boolean(m) &&
+        typeof m.id === 'string' &&
+        m.id.endsWith(':free') &&
+        m.isFree === true &&
+        typeof m.name === 'string'
+    );
+    return valid.length > 0 ? valid : CURATED_FREE_MODELS;
+  } catch {
+    return CURATED_FREE_MODELS;
+  }
+}
+
 export function useModels(apiKey?: string, defaultModel = DEFAULT_MODEL_ID) {
-  const [models, setModels] = useState<AIModel[]>(CURATED_FREE_MODELS);
+  const [models, setModels] = useState<AIModel[]>(() => {
+    if (typeof window === 'undefined') return CURATED_FREE_MODELS;
+    return readCachedCatalog();
+  });
   const [selectedModel, setSelectedModelState] = useState<string>(() =>
     resolveSafeModelId(defaultModel, CURATED_FREE_MODELS)
   );
@@ -73,16 +97,30 @@ export function useModels(apiKey?: string, defaultModel = DEFAULT_MODEL_ID) {
       if (res.ok) {
         const data = await res.json();
         if (data.models?.length > 0) {
-          setModels(applyCooldowns(data.models));
-          setSelectedModelState((current) => {
-            const safeModel = resolveSafeModelId(current || defaultModel, data.models);
-            localStorage.setItem(STORAGE_KEY, safeModel);
-            return safeModel;
-          });
+          const freshModels = data.models.filter(
+            (m: AIModel) => m && typeof m.id === 'string' && m.id.endsWith(':free') && m.isFree === true
+          );
+          if (freshModels.length > 0) {
+            setModels(applyCooldowns(freshModels));
+            try {
+              localStorage.setItem(CATALOG_STORAGE_KEY, JSON.stringify(freshModels));
+            } catch {
+              // Ignore storage errors
+            }
+            setSelectedModelState((current) => {
+              const safeModel = resolveSafeModelId(current || defaultModel, freshModels);
+              localStorage.setItem(STORAGE_KEY, safeModel);
+              return safeModel;
+            });
+          }
         }
+      } else {
+        // Fall back to cached catalog if available
+        setModels(applyCooldowns(readCachedCatalog()));
       }
     } catch (err) {
       console.error('Failed to fetch models:', err);
+      setModels(applyCooldowns(readCachedCatalog()));
     } finally {
       setLoading(false);
     }

@@ -36,14 +36,28 @@ export function debounce<T extends (...args: unknown[]) => unknown>(fn: T, ms: n
 }
 
 export function safeExternalUrl(url?: string | null): string | undefined {
-  if (!url) return undefined;
+  if (!url || typeof url !== 'string') return undefined;
+  const trimmed = url.trim();
+  if (!trimmed) return undefined;
+
   try {
-    const parsed = new URL(url, 'https://openconvo.local');
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'mailto:') {
-      return url;
+    // Parse strictly as absolute URL without base URL fallback
+    const parsed = new URL(trimmed);
+    const protocol = parsed.protocol.toLowerCase();
+
+    if (protocol === 'http:' || protocol === 'https:') {
+      if (!parsed.hostname || parsed.hostname.length === 0) {
+        return undefined;
+      }
+      return parsed.toString();
+    }
+
+    if (protocol === 'mailto:') {
+      return parsed.toString();
     }
   } catch {
     return undefined;
   }
+
   return undefined;
 }

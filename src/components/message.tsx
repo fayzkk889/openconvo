@@ -12,6 +12,7 @@ import {
   Route,
   Sparkles,
   GitCompare,
+  FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownRenderer } from '@/lib/markdown';
@@ -39,10 +40,13 @@ export function Message({
   onPrefer,
 }: MessageProps) {
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [docsOpen, setDocsOpen] = useState(false);
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
   const hasSearchResults =
     message.searchResults && message.searchResults.length > 0;
+  const hasDocumentExcerpts =
+    message.documentExcerpts && message.documentExcerpts.length > 0;
   const researchTrace = message.researchTrace;
   const taskPreset = message.taskType && message.taskType !== 'auto'
     ? TASK_PRESETS.find((task) => task.id === message.taskType)
@@ -327,6 +331,58 @@ export function Message({
                       </SourceWrapper>
                     );
                   })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Document Evidence / Sources */}
+          {hasDocumentExcerpts && (
+            <div className="mt-4 w-full">
+              <button
+                onClick={() => setDocsOpen(!docsOpen)}
+                className="flex items-center gap-1.5 rounded-md px-2 py-1 -ml-2 text-xs font-medium text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors"
+              >
+                {docsOpen ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+                <FileText className="h-3 w-3" />
+                <span>Document Evidence ({message.documentExcerpts!.length})</span>
+              </button>
+
+              {docsOpen && (
+                <div className="mt-2 flex flex-col gap-2">
+                  {message.documentExcerpts!.map((excerpt) => (
+                    <div
+                      key={excerpt.chunkId}
+                      className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-2.5 text-xs text-[var(--color-text-secondary)]"
+                    >
+                      <div className="flex flex-wrap items-center gap-2 font-medium text-[var(--color-text-primary)]">
+                        <span className="font-mono text-[var(--color-accent)] font-semibold">[{excerpt.citationId}]</span>
+                        <span className="truncate max-w-[200px]">{excerpt.filename}</span>
+                        {excerpt.pageNumber && (
+                          <span className="rounded bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-tertiary)]">
+                            Page {excerpt.pageNumber}
+                          </span>
+                        )}
+                        {excerpt.startLine && excerpt.endLine && (
+                          <span className="rounded bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-tertiary)]">
+                            Lines {excerpt.startLine}-{excerpt.endLine}
+                          </span>
+                        )}
+                        {excerpt.sectionHeading && (
+                          <span className="rounded bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-tertiary)] truncate max-w-[150px]">
+                            {excerpt.sectionHeading}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-[var(--color-text-tertiary)] font-mono text-[11px] leading-relaxed">
+                        {excerpt.text.slice(0, 180)}...
+                      </p>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

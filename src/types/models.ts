@@ -8,6 +8,8 @@ export interface AIModel {
   cooldownUntil?: number;
 }
 
+export type ReliabilityOutcome = 'success' | 'failure' | 'rate_limited' | 'interrupted' | 'empty';
+
 export interface ModelReliability {
   id: string;
   modelId: string;
@@ -15,9 +17,11 @@ export interface ModelReliability {
   successes: number;
   failures: number;
   rateLimits: number;
+  emptyCount?: number;
+  interruptedCount?: number;
   preferenceWins?: number;
   totalLatencyMs: number;
-  lastOutcome: 'success' | 'failure' | 'rate_limited';
+  lastOutcome: ReliabilityOutcome;
   lastUsedAt: number;
   updatedAt: number;
 }

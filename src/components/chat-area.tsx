@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useEffect, useState } from 'react';
-import { Message, Attachment, Conversation, TaskType, ResearchStatus } from '@/types/chat';
+import { Message, Attachment, Conversation, TaskType, ResearchStatus, RequestLifecycleState } from '@/types/chat';
 import { AIModel } from '@/types/models';
 import type { ModelReliability } from '@/types/models';
 import { PromptSnippet } from '@/types/settings';
@@ -22,6 +22,8 @@ interface ChatAreaProps {
   conversation: Conversation | null;
   messages: Message[];
   isStreaming: boolean;
+  isBusy?: boolean;
+  lifecycleState?: RequestLifecycleState;
   researchStatus: ResearchStatus | null;
   error: string | null;
   onSendMessage: (args: { content: string; attachments?: Attachment[]; searchEnabled?: boolean; researchEnabled?: boolean; agentEnabled?: boolean; taskType?: TaskType; compareEnabled?: boolean }) => void;
@@ -59,6 +61,8 @@ export function ChatArea({
   conversation,
   messages,
   isStreaming,
+  isBusy,
+  lifecycleState,
   researchStatus,
   error,
   onSendMessage,
@@ -260,6 +264,8 @@ export function ChatArea({
           <Composer
             onSend={handleSend}
             isStreaming={isStreaming}
+            isBusy={isBusy}
+            lifecycleState={lifecycleState}
             onStop={onStopStreaming}
             models={models}
             selectedModel={selectedModel}

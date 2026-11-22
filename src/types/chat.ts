@@ -1,14 +1,28 @@
+import type { DocumentExcerpt, DocumentProcessingStatus, DocumentRecord, DocumentChunk } from '@/types/document';
+
 export interface Attachment {
   id: string;
   name: string;
   type: string;
   size: number;
   content: string; // extracted text content
+  documentId?: string;
+  status?: DocumentProcessingStatus;
+  pageCount?: number;
+  chunkCount?: number;
+  warning?: string;
+  error?: string;
+  documentRecord?: DocumentRecord;
+  chunks?: DocumentChunk[];
 }
 
 export interface SearchResultRef {
+  id?: string;
   title: string;
   url: string;
+  canonicalUrl?: string;
+  domain?: string;
+  publishedAt?: string;
   snippet: string;
   content?: string;
   extracted?: boolean;
@@ -39,7 +53,75 @@ export interface ResearchStatus {
   openedCount?: number;
 }
 
+export type RequestLifecycleState =
+  | 'idle'
+  | 'preparing'
+  | 'searching'
+  | 'connecting'
+  | 'streaming'
+  | 'persisting'
+  | 'completed'
+  | 'cancelled'
+  | 'failed';
+
 export type TaskType = 'auto' | 'quick' | 'research' | 'deep-research' | 'file' | 'code' | 'writing';
+
+export type MessageStatus = 'complete' | 'interrupted' | 'failed' | 'degraded';
+
+export interface TokenUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+}
+
+export type StreamingChatEvent =
+  | {
+      type: 'meta';
+      requestId: string;
+      model: string;
+      mode: 'byok' | 'hosted-free';
+    }
+  | {
+      type: 'delta';
+      content: string;
+      model?: string;
+    }
+  | {
+      type: 'fallback';
+      fromModel: string;
+      toModel: string;
+      reason: string;
+      rateLimitedModels?: string[];
+      retryAfterSeconds?: number;
+    }
+  | {
+      type: 'complete';
+      model: string;
+      finishReason?: 'stop' | 'length' | 'content_filter' | 'error' | string;
+      usage?: TokenUsage;
+    }
+  | {
+      type: 'interrupted';
+      model: string;
+      partialContent: string;
+      reason: string;
+      finishReason?: string;
+    }
+  | {
+      type: 'error';
+      error: string;
+      code?: string;
+      model?: string;
+      failedModels?: string[];
+      rateLimitedModels?: string[];
+      retryAfterSeconds?: number;
+    }
+  | {
+      type: 'research_fallback';
+      content: string;
+      model: string;
+      reason: string;
+    };
 
 export interface Message {
   id: string;
@@ -48,6 +130,7 @@ export interface Message {
   content: string;
   model?: string;
   attachments?: Attachment[];
+  documentExcerpts?: DocumentExcerpt[];
   searchResults?: SearchResultRef[];
   researchTrace?: ResearchTrace;
   researchMode?: boolean;
@@ -58,6 +141,9 @@ export interface Message {
   compareRun?: boolean;
   preferred?: boolean;
   isError?: boolean;
+  status?: MessageStatus;
+  finishReason?: string;
+  tokenUsage?: TokenUsage;
   timestamp: number;
 }
 
@@ -68,6 +154,7 @@ export interface Conversation {
   projectId?: string;
   pinned?: boolean;
   archived?: boolean;
+  titleManuallySet?: boolean;
   createdAt: number;
   updatedAt: number;
 }

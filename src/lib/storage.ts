@@ -1,6 +1,7 @@
 import { getDB } from './db';
 import { Artifact, Conversation, Message, Project, TaskType } from '@/types/chat';
 import { ModelReliability } from '@/types/models';
+import { DocumentRecord, DocumentChunk } from '@/types/document';
 import { generateId } from './utils';
 import { DEFAULT_MODEL_ID } from './models';
 import { normalizeTaskType } from './tasks';
@@ -98,7 +99,7 @@ export async function updateConversation(id: string, updates: Partial<Conversati
 
 export async function deleteConversation(id: string): Promise<void> {
   const db = await getDB();
-  const tx = db.transaction(['conversations', 'messages', 'artifacts'], 'readwrite');
+  const tx = db.transaction(['conversations', 'messages', 'artifacts', 'documents', 'documentChunks'], 'readwrite');
   await tx.objectStore('conversations').delete(id);
 
   const messageStore = tx.objectStore('messages');
@@ -116,6 +117,23 @@ export async function deleteConversation(id: string): Promise<void> {
     await artifactCursor.delete();
     artifactCursor = await artifactCursor.continue();
   }
+
+  const documentStore = tx.objectStore('documents');
+  const documentIndex = documentStore.index('by-conversation');
+  let documentCursor = await documentIndex.openCursor(id);
+  while (documentCursor) {
+    await documentCursor.delete();
+    documentCursor = await documentCursor.continue();
+  }
+
+  const chunkStore = tx.objectStore('documentChunks');
+  const chunkIndex = chunkStore.index('by-conversation');
+  let chunkCursor = await chunkIndex.openCursor(id);
+  while (chunkCursor) {
+    await chunkCursor.delete();
+    chunkCursor = await chunkCursor.continue();
+  }
+
   await tx.done;
 }
 
@@ -124,18 +142,41 @@ export async function deleteConversation(id: string): Promise<void> {
 export async function addMessage(
   conversationId: string,
   message: Omit<Message, 'id' | 'conversationId' | 'timestamp'>
-): Promise<Message> {
+): Promise<Message | null> {
   const db = await getDB();
+  const tx = db.transaction(['conversations', 'messages'], 'readwrite');
+  const convStore = tx.objectStore('conversations');
+  const existingConv = await convStore.get(conversationId);
+  if (!existingConv) {
+    await tx.done;
+    return null; // Atomic check: conversation does not exist, abort message write!
+  }
+
   const fullMessage: Message = {
     ...message,
     id: generateId(),
     conversationId,
     timestamp: Date.now(),
   };
-  await db.put('messages', fullMessage);
-  // Update conversation timestamp
-  await updateConversation(conversationId, {});
+  await tx.objectStore('messages').put(fullMessage);
+  await convStore.put({ ...existingConv, updatedAt: Date.now() });
+  await tx.done;
   return fullMessage;
+}
+
+export async function updateAutoTitle(id: string, title: string): Promise<boolean> {
+  const db = await getDB();
+  const tx = db.transaction('conversations', 'readwrite');
+  const store = tx.objectStore('conversations');
+  const existing = await store.get(id);
+  // Transactional guard: If conversation does not exist OR user already manually set the title, ABORT!
+  if (!existing || existing.titleManuallySet) {
+    await tx.done;
+    return false;
+  }
+  await store.put({ ...existing, title, updatedAt: Date.now() });
+  await tx.done;
+  return true;
 }
 
 export async function getMessages(conversationId: string): Promise<Message[]> {
@@ -167,6 +208,51 @@ export async function deleteMessage(id: string): Promise<void> {
     cursor = await cursor.continue();
   }
   await tx.done;
+}
+
+/**
+ * Step 0 Invariants 1 & 2: Atomically replace a list of historical messages with a replacement message
+ * inside a single IndexedDB transaction. If anything fails, the entire transaction rolls back.
+ */
+export async function replaceMessagesTransactional(
+  conversationId: string,
+  deleteMessageIds: string[],
+  newMessage: Omit<Message, 'id' | 'conversationId' | 'timestamp'>
+): Promise<Message> {
+  const db = await getDB();
+  const tx = db.transaction(['messages', 'artifacts', 'conversations'], 'readwrite');
+  const messageStore = tx.objectStore('messages');
+
+  for (const id of deleteMessageIds) {
+    await messageStore.delete(id);
+  }
+
+  const artifactStore = tx.objectStore('artifacts');
+  const artifactIndex = artifactStore.index('by-conversation');
+  let cursor = await artifactIndex.openCursor(conversationId);
+  while (cursor) {
+    if (cursor.value.sourceMessageId && deleteMessageIds.includes(cursor.value.sourceMessageId)) {
+      await cursor.delete();
+    }
+    cursor = await cursor.continue();
+  }
+
+  const fullMessage: Message = {
+    ...newMessage,
+    id: generateId(),
+    conversationId,
+    timestamp: Date.now(),
+  };
+  await messageStore.put(fullMessage);
+
+  const conversationStore = tx.objectStore('conversations');
+  const existingConv = await conversationStore.get(conversationId);
+  if (existingConv) {
+    await conversationStore.put({ ...existingConv, updatedAt: Date.now() });
+  }
+
+  await tx.done;
+  return fullMessage;
 }
 
 // ---- Artifacts ----
@@ -244,6 +330,8 @@ export async function recordModelOutcome({
     successes: existing?.successes || 0,
     failures: existing?.failures || 0,
     rateLimits: existing?.rateLimits || 0,
+    emptyCount: existing?.emptyCount || 0,
+    interruptedCount: existing?.interruptedCount || 0,
     preferenceWins: existing?.preferenceWins || 0,
     totalLatencyMs: existing?.totalLatencyMs || 0,
     lastOutcome: outcome,
@@ -256,6 +344,13 @@ export async function recordModelOutcome({
     next.totalLatencyMs += Math.max(Math.floor(latencyMs), 0);
   } else if (outcome === 'rate_limited') {
     next.rateLimits += 1;
+  } else if (outcome === 'empty') {
+    next.emptyCount = (next.emptyCount || 0) + 1;
+    next.failures += 1;
+  } else if (outcome === 'interrupted') {
+    next.interruptedCount = (next.interruptedCount || 0) + 1;
+    // Interrupted is a partial success / partial failure; slight penalty
+    next.failures += 1;
   } else {
     next.failures += 1;
   }
@@ -306,24 +401,91 @@ export async function clearAllData(): Promise<void> {
   await db.clear('messages');
   await db.clear('artifacts');
   await db.clear('modelReliability');
+  await db.clear('documents');
+  await db.clear('documentChunks');
 }
 
-export async function exportAllData(): Promise<{ projects: Project[]; conversations: Conversation[]; messages: Message[]; artifacts: Artifact[] }> {
+// ---- Documents & Document Chunks ----
+
+export async function saveDocument(doc: DocumentRecord, chunks: DocumentChunk[]): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(['documents', 'documentChunks'], 'readwrite');
+  await tx.objectStore('documents').put(doc);
+  const chunkStore = tx.objectStore('documentChunks');
+  for (const chunk of chunks) {
+    await chunkStore.put(chunk);
+  }
+  await tx.done;
+}
+
+export async function getDocument(id: string): Promise<DocumentRecord | undefined> {
+  const db = await getDB();
+  return db.get('documents', id);
+}
+
+export async function getDocumentsByConversation(conversationId: string): Promise<DocumentRecord[]> {
+  const db = await getDB();
+  return db.getAllFromIndex('documents', 'by-conversation', conversationId);
+}
+
+export async function getDocumentChunks(documentId: string): Promise<DocumentChunk[]> {
+  const db = await getDB();
+  return db.getAllFromIndex('documentChunks', 'by-document', documentId);
+}
+
+export async function getConversationChunks(conversationId: string): Promise<DocumentChunk[]> {
+  const db = await getDB();
+  return db.getAllFromIndex('documentChunks', 'by-conversation', conversationId);
+}
+
+export async function deleteDocument(id: string): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(['documents', 'documentChunks'], 'readwrite');
+  await tx.objectStore('documents').delete(id);
+  const chunkStore = tx.objectStore('documentChunks');
+  const index = chunkStore.index('by-document');
+  let cursor = await index.openCursor(id);
+  while (cursor) {
+    await cursor.delete();
+    cursor = await cursor.continue();
+  }
+  await tx.done;
+}
+
+export async function exportAllData(): Promise<{
+  projects: Project[];
+  conversations: Conversation[];
+  messages: Message[];
+  artifacts: Artifact[];
+  documents?: DocumentRecord[];
+  documentChunks?: DocumentChunk[];
+}> {
   const db = await getDB();
   const projects = await db.getAll('projects');
   const conversations = await db.getAll('conversations');
   const messages = await db.getAll('messages');
   const artifacts = await db.getAll('artifacts');
-  return { projects, conversations, messages, artifacts };
+  const documents = await db.getAll('documents');
+  const documentChunks = await db.getAll('documentChunks');
+  return { projects, conversations, messages, artifacts, documents, documentChunks };
 }
 
-export async function importAllData(data: { projects?: Project[]; conversations: Conversation[]; messages: Message[]; artifacts?: Artifact[] }): Promise<void> {
+export async function importAllData(data: {
+  projects?: Project[];
+  conversations: Conversation[];
+  messages: Message[];
+  artifacts?: Artifact[];
+  documents?: DocumentRecord[];
+  documentChunks?: DocumentChunk[];
+}): Promise<void> {
   const db = await getDB();
-  const tx = db.transaction(['projects', 'conversations', 'messages', 'artifacts'], 'readwrite');
+  const tx = db.transaction(['projects', 'conversations', 'messages', 'artifacts', 'documents', 'documentChunks'], 'readwrite');
   const projectStore = tx.objectStore('projects');
   const conversationStore = tx.objectStore('conversations');
   const messageStore = tx.objectStore('messages');
   const artifactStore = tx.objectStore('artifacts');
+  const documentStore = tx.objectStore('documents');
+  const chunkStore = tx.objectStore('documentChunks');
 
   for (const project of data.projects || []) {
     await projectStore.put(project);
@@ -339,6 +501,14 @@ export async function importAllData(data: { projects?: Project[]; conversations:
 
   for (const artifact of data.artifacts || []) {
     await artifactStore.put(artifact);
+  }
+
+  for (const doc of data.documents || []) {
+    await documentStore.put(doc);
+  }
+
+  for (const chunk of data.documentChunks || []) {
+    await chunkStore.put(chunk);
   }
 
   await tx.done;

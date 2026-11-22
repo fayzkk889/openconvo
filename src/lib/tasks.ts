@@ -86,6 +86,20 @@ export function taskInstruction(taskType?: TaskType): string {
   }
 }
 
+export function hasExplicitNegativeSearchConstraint(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  return (
+    /\b(?:do\s+not|don'?t|never|no|stop|without|skip)\s+(?:use\s+)?(?:web\s+)?(?:search|research|browsing|browse|internet|googling)\b/i.test(lower) ||
+    /\b(?:do\s+not|don'?t)\s+(?:search|browse|look\s+up\s+online)\b/i.test(lower) ||
+    /\b(?:no\s+web\s+search|no\s+search|without\s+search(?:ing)?|without\s+browsing)\b/i.test(lower) ||
+    /\b(?:asking\s+for\s+a\s+plan,\s+not\s+(?:actual\s+)?(?:external\s+)?research)\b/i.test(lower) ||
+    /\b(?:using\s+(?:only\s+)?(?:the\s+)?(?:information|context|details|text)\s+(?:in|provided\s+in)\s+my\s+message)\b/i.test(lower) ||
+    /\b(?:based\s+(?:only\s+)?on\s+(?:the\s+)?(?:information|context|details|text)\s+(?:in|provided\s+in)\s+my\s+message)\b/i.test(lower) ||
+    /\b(?:rely\s+(?:only\s+)?on\s+(?:the\s+)?(?:information|context|details|text)\s+(?:in|provided\s+in)\s+my\s+message)\b/i.test(lower) ||
+    /\b(?:purely\s+fictional|entirely\s+fictional|this\s+is\s+fictional|my\s+fictional)\b/i.test(lower)
+  );
+}
+
 export function inferTaskType({
   content,
   attachments,
@@ -103,6 +117,17 @@ export function inferTaskType({
   // Attachments are always local file tasks unless explicit research is active
   if (attachments?.length) return 'file';
   if (isCasualGreeting(content.trim()) || isCasualGreeting(text)) return 'quick';
+
+  // Explicit negative constraint or pure local/fictional context: never infer research
+  if (hasExplicitNegativeSearchConstraint(rawText) || isObviouslyLocalOrPersonal(rawText)) {
+    if (/\b(code|function|variable|snippet|bug|debug|typescript|javascript|python|react|component|method|class|scope)\b/.test(text)) {
+      return 'code';
+    }
+    if (/\b(write|draft|plan|improve|polish|rewrite|edit)\b/.test(text)) {
+      return 'writing';
+    }
+    return 'quick';
+  }
 
   // Explicit deep research keywords
   if (/\b(deep research|deep dive|comprehensive research|full research|thorough research|market map|research report|literature review|competitive analysis)\b/.test(text)) {
@@ -127,6 +152,12 @@ export function inferTaskType({
   // Next check genuine web research needs
   if (needsWebResearch(rawText)) {
     return 'research';
+  }
+
+  // Ordinary arithmetic or math expressions must not be classified as code
+  const isArithmetic = /^(?:calculate|compute|solve|what\s+is|\d+)\s*[\d\s+\-*/^().%=]+(?:\s*[?.])?$/i.test(text.trim());
+  if (isArithmetic) {
+    return 'quick';
   }
 
   if (/\b(code|bug|debug|typescript|javascript|react|next\.?js|api|function|component|error|stack trace|compile|build|database|sql|python)\b/.test(text)) {
@@ -166,6 +197,24 @@ export function resolveWorkflow({
   researchEnabled?: boolean;
 }): WorkflowDecision {
   const isGreeting = isCasualGreeting(content.trim());
+  const hasNegativeSearch = hasExplicitNegativeSearchConstraint(content);
+
+  // Explicit negative constraint: if the prompt explicitly forbids web search, honor user intent over auto or toggle
+  if (hasNegativeSearch) {
+    const finalTaskType = (taskType === 'research' || taskType === 'deep-research')
+      ? 'quick'
+      : (taskType && taskType !== 'auto'
+          ? taskType
+          : inferTaskType({ content, attachments, searchEnabled: false, researchEnabled: false }));
+    return {
+      taskType: finalTaskType,
+      searchMode: 'none',
+      shouldSearch: false,
+      isQuickTask: finalTaskType === 'quick',
+      autoRouted: !taskType || taskType === 'auto',
+    };
+  }
+
   const effectiveTaskType = (!taskType || taskType === 'auto')
     ? inferTaskType({ content, attachments, searchEnabled, researchEnabled })
     : taskType;
@@ -229,7 +278,7 @@ export function resolveWorkflow({
 export function needsWebResearch(text: string): boolean {
   const lower = text.toLowerCase();
 
-  if (isObviouslyLocalOrPersonal(lower)) {
+  if (hasExplicitNegativeSearchConstraint(lower) || isObviouslyLocalOrPersonal(lower)) {
     return false;
   }
 
@@ -288,11 +337,13 @@ export function needsWebResearch(text: string): boolean {
 export function isObviouslyLocalOrPersonal(text: string): boolean {
   const lower = text.toLowerCase().trim();
   return (
-    /\b(my file|attached|attachment|this document|my code|this code|these code snippets|code snippet|this snippet|above text|my note|my notes|rewrite this|summarize this|this function|this variable|this class|this component|this method|my project|a plan for my project|our project|this error|this stack trace|this issue)\b/i.test(lower) ||
-    /^(?:now\s+)?(?:explain|describe|clarify|summarize|refactor|debug|fix|optimize|review|rewrite)\s+(?:this|these|the following|above)\b/i.test(lower) ||
-    /^(?:write|create|draft|generate|make)\s+(?:a\s+)?(?:plan|outline|schedule|draft|template|example|function|test|script)\s+for\s+(?:my|our|this|a)\b/i.test(lower) ||
+    /\b(my file|attached|attachment|this document|my code|this code|these code snippets|code snippet|this snippet|above text|my note|my notes|rewrite this|rewrite that|summarize this|summarize that|this function|this variable|this class|this component|this method|my project|a plan for my project|our project|this error|this stack trace|this issue)\b/i.test(lower) ||
+    /^(?:now\s+)?(?:explain|describe|clarify|summarize|refactor|debug|fix|optimize|review|rewrite|reformat|shorten|simplify)\s+(?:this|these|that|the following|above)\b/i.test(lower) ||
+    /^(?:write|create|draft|generate|make)\s+(?:a\s+)?(?:research\s+)?(?:plan|outline|schedule|draft|template|example|function|test|script)(?:\s+and\s+(?:plan|outline|schedule))?\s+for\s+(?:my|our|this|a)\b/i.test(lower) ||
     /\b(?:current\s+value\s+of\s+this|value\s+of\s+(?:this\s+)?variable|in\s+this\s+scope)\b/i.test(lower) ||
-    /\b(?:compare\s+these\s+two\s+(?:code\s+)?snippets?)\b/i.test(lower)
+    /\b(?:compare\s+these\s+two\s+(?:code\s+)?snippets?)\b/i.test(lower) ||
+    /\b(?:in\s+my\s+message|provided\s+in\s+my\s+message|from\s+my\s+message|fictional\s+(?:scenario|project|context|entity|product|service|company|application)|my\s+fictional)\b/i.test(lower) ||
+    /^(?:can\s+you\s+)?(?:rewrite|summarize|shorten|simplify|reformat|explain)\s+(?:this|that|it)(?:\s+(?:more\s+concisely|more\s+simply|as\s+a\s+table|better))?/i.test(lower)
   );
 }
 

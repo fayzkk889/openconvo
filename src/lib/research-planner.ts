@@ -218,10 +218,10 @@ export function planResearchQueries(
 ): ResearchPlan {
   const originalQuery = normalizeSearchQuery(query);
   const contextEntities = (options?.contextEntities || []).filter(Boolean);
-  const isAnaphoric = hasAnaphoricReference(originalQuery);
-
   const analysis = analyzeResearchQuery(originalQuery);
-  if (isAnaphoric && contextEntities.length > 0) {
+  const isContextDependent = isContextDependentQuery(originalQuery, analysis.subjects);
+
+  if (isContextDependent && contextEntities.length > 0) {
     analysis.subjects = dedupeQueries([...contextEntities, ...analysis.subjects]).slice(0, MAX_SUBJECTS);
   }
 
@@ -233,7 +233,7 @@ export function planResearchQueries(
   const candidates = [
     originalQuery,
     ...(primaryCompactQuery !== originalQuery ? [primaryCompactQuery] : []),
-    ...(isAnaphoric && contextEntities.length > 0
+    ...(isContextDependent && contextEntities.length > 0
       ? [`${contextEntities.slice(0, 2).join(' ')} ${stripAnaphoricWords(originalQuery)}`.slice(0, 120).trim()]
       : []),
     ...priorityIntentQueries(analysis),
@@ -258,8 +258,9 @@ export function planStructuredResearch(
 ): StructuredResearchPlan {
   const plan = planResearchQueries(query, options);
   const analysis = analyzeResearchQuery(query);
+  const isContextDependent = isContextDependentQuery(query, analysis.subjects);
   const entities = dedupeQueries([
-    ...(options?.contextEntities || []),
+    ...(isContextDependent ? (options?.contextEntities || []) : []),
     ...analysis.subjects,
   ]).slice(0, 5);
 
@@ -338,8 +339,27 @@ export function detectEvidenceGaps(
   };
 }
 
-function hasAnaphoricReference(text: string): boolean {
-  return /\b(their|they|them|both|these|the two|the former|the latter|it|its|that|those)\b/i.test(text);
+export function isContextDependentQuery(query: string, subjects: string[]): boolean {
+  const lower = query.toLowerCase().trim();
+  const startsWithAnaphoric = /^(?:what\s+(?:about|is|are)|how\s+(?:about|does|is|much\s+is)|and|is|are|can|does|tell\s+me\s+about)\s+(?:it|its|they|their|them|that|these|those|both|the\s+former|the\s+latter)\b/i.test(lower);
+  const isBareAnaphoric = /^(?:it|its|they|their|them|that|these|those|both|the\s+former|the\s+latter)\b/i.test(lower) ||
+    /\b(?:its|their)\s+(?:pricing|price|cost|release\s+date|documentation|features?|pros\s+and\s+cons|alternatives?|battery\s+life|license)\b/i.test(lower) ||
+    /^(?:compare\s+(?:them|both|these|the\s+two)|how\s+do\s+they\s+compare|which\s+(?:one\s+)?is\s+better)\b/i.test(lower);
+
+  if (startsWithAnaphoric || isBareAnaphoric) {
+    return true;
+  }
+
+  // If query doesn't start with or center on an anaphoric reference, check if it has independent subjects
+  if (subjects.length >= 2) return false;
+  if (subjects.length === 1) {
+    const s = subjects[0].toLowerCase();
+    if (s.length >= 4 && !/^(it|its|that|this|these|those|they|them|pricing|cost|release|features?)$/i.test(s)) {
+      return false;
+    }
+  }
+
+  return false;
 }
 
 function stripAnaphoricWords(text: string): string {

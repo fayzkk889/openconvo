@@ -99,6 +99,7 @@ export function Composer({
     const currentAttachments = attachments.length > 0 ? attachments : undefined;
     setContent('');
     setAttachments([]);
+    setTaskType((prev) => (prev === 'file' ? 'auto' : prev));
 
     onSend({
       content: trimmed,

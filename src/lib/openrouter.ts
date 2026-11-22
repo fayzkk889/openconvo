@@ -23,16 +23,43 @@ export class OpenRouterError extends Error {
   providerMessage?: string;
 
   constructor(status: number, body: string) {
-    super(`OpenRouter error ${status}: ${body}`);
+    const details = parseOpenRouterErrorBody(body);
+    const sanitized = formatSanitizedOpenRouterMessage(status, details);
+    super(sanitized);
     this.name = 'OpenRouterError';
     this.status = status;
     this.body = body;
 
-    const details = parseOpenRouterErrorBody(body);
     this.retryAfterSeconds = details.retryAfterSeconds;
     this.providerName = details.providerName;
     this.providerMessage = details.message;
   }
+}
+
+export function formatSanitizedOpenRouterMessage(
+  status: number,
+  details: { message?: string; providerName?: string; retryAfterSeconds?: number }
+): string {
+  const retryText = details.retryAfterSeconds
+    ? ` Retry in about ${Math.ceil(details.retryAfterSeconds)} seconds.`
+    : '';
+  const providerText = details.providerName ? ` (${details.providerName})` : '';
+
+  if (status === 429) {
+    return `The free OpenRouter provider${providerText} is temporarily rate-limited.${retryText} Try again shortly or switch to another free model.`;
+  }
+  if (status === 402) {
+    return 'OpenRouter rejected the request because it was not available at zero price. OpenConvo blocked paid routing; choose a :free model and try again.';
+  }
+  if (status === 401 || status === 403) {
+    return 'OpenRouter rejected the API key. Check your OpenRouter key in Settings or your .env.local file.';
+  }
+  const rawMsg = details.message
+    ? details.message.replace(/sk-[a-zA-Z0-9_-]+/g, '[REDACTED_KEY]')
+    : '';
+  return rawMsg
+    ? `OpenRouter error ${status}: ${rawMsg}`
+    : `OpenRouter error ${status}. Please try another free model.`;
 }
 
 export function formatOpenRouterError(error: OpenRouterError, model?: string): string {
@@ -54,8 +81,12 @@ export function formatOpenRouterError(error: OpenRouterError, model?: string): s
     return 'OpenRouter rejected the API key. Check your OpenRouter key in Settings or your .env.local file.';
   }
 
-  return error.providerMessage
-    ? `OpenRouter error ${error.status}${modelText}: ${error.providerMessage}`
+  const rawMsg = error.providerMessage
+    ? error.providerMessage.replace(/sk-[a-zA-Z0-9_-]+/g, '[REDACTED_KEY]')
+    : '';
+
+  return rawMsg
+    ? `OpenRouter error ${error.status}${modelText}: ${rawMsg}`
     : `OpenRouter error ${error.status}${modelText}. Please try another free model.`;
 }
 

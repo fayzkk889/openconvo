@@ -30,6 +30,7 @@ type StreamingDisplay = {
   append: (content: string) => void;
   finish: (finalContent: string) => Promise<void>;
   cancel: () => void;
+  getDisplayedContent: () => string;
 };
 
 interface ActiveRun {
@@ -427,10 +428,10 @@ export function useChat(
           setMessages((prev) => [...prev, placeholderMessage]);
           setResearchStatus(null);
 
+          let finalModel = runModel;
           try {
             const requestStartedAt = Date.now();
             let fullContent = '';
-            let finalModel = runModel;
             streamDisplay = createStreamingDisplay(assistantId, () => finalModel, setMessages);
             activeStreamingDisplayRef.current = streamDisplay;
 
@@ -582,7 +583,35 @@ export function useChat(
             activeStreamingDisplayRef.current = null;
 
             if ((err as Error).name === 'AbortError' || runController.signal.aborted) {
-              setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+              const partial = streamDisplay?.getDisplayedContent() || '';
+              if (partial.trim()) {
+                const targetConv = await storage.getConversation(targetConversationId);
+                if (targetConv) {
+                  const interruptedMsg = await storage.addMessage(targetConversationId, {
+                    role: 'assistant',
+                    content: partial,
+                    model: finalModel,
+                    researchMode: shouldUseResearch,
+                    agentMode: agentEnabled === true,
+                    taskType: effectiveTaskType,
+                    autoRouted,
+                    routingNote,
+                    compareRun: runModels.length > 1,
+                    searchResults: placeholderMessage.searchResults,
+                    researchTrace: placeholderMessage.researchTrace,
+                    documentExcerpts,
+                    status: 'interrupted',
+                    finishReason: 'cancelled',
+                  });
+                  if (interruptedMsg && activeConversationIdRef.current === targetConversationId) {
+                    setMessages((prev) =>
+                      prev.map((m) => (m.id === assistantId ? interruptedMsg : m))
+                    );
+                  }
+                }
+              } else {
+                setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+              }
               run.state = 'cancelled';
               return;
             }
@@ -595,7 +624,7 @@ export function useChat(
               onModelOutcome?.({ modelId: runModel, taskType: effectiveTaskType, outcome: 'failure' });
             }
 
-            const fallbackContent = buildClientResearchFallback(content.trim(), placeholderMessage.searchResults, errorMessage);
+            const fallbackContent = buildClientResearchFallback(content.trim(), placeholderMessage.searchResults, errorMessage, shouldUseSearch);
             if (fallbackContent) {
               const storedFallback = await storage.addMessage(targetConversationId, {
                 role: 'assistant',
@@ -916,7 +945,12 @@ export function useChat(
           onModelOutcome?.({ modelId: model, taskType: targetMessage.taskType, outcome: 'failure' });
         }
 
-        const fallbackContent = buildClientResearchFallback(userMsg.content, targetMessage.searchResults, errorMessage);
+        const fallbackContent = buildClientResearchFallback(
+          userMsg.content,
+          targetMessage.searchResults,
+          errorMessage,
+          Boolean(targetMessage.researchMode || targetMessage.taskType === 'research' || targetMessage.taskType === 'deep-research')
+        );
         if (fallbackContent) {
           const targetConv = await storage.getConversation(targetConversationId);
           if (!targetConv) {
@@ -1163,12 +1197,18 @@ function compactSearchResultsForAttempt<T extends { content?: string; snippet?: 
 function buildClientResearchFallback(
   question: string,
   sources: Message['searchResults'],
-  reason: string
+  reason: string,
+  isResearchTask?: boolean
 ): string | null {
+  if (!isResearchTask) return null;
   if (!sources?.length) return null;
+  const usefulSources = sources.filter(
+    (s) => s.sourceLabel === 'Strong' || s.sourceLabel === 'Useful' || (typeof s.sourceScore === 'number' && s.sourceScore >= 50)
+  );
+  if (usefulSources.length === 0) return null;
   return buildResearchFallbackAnswer({
     question,
-    sources,
+    sources: usefulSources,
     reason,
   });
 }
@@ -1290,12 +1330,16 @@ function createStreamingDisplay(
       displayed = finalContent;
       render();
     },
+    getDisplayedContent() {
+      return displayed + pending;
+    },
     cancel() {
       cancelled = true;
       if (timer) {
         window.clearTimeout(timer);
         timer = null;
       }
+      displayed += pending;
       pending = '';
     },
   };

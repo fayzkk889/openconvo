@@ -809,6 +809,32 @@ const evalCases = [
     prompt: 'Synthesize research on Quantum Annealing',
     testDegraded: true,
   },
+  {
+    id: 'eval-13',
+    name: 'Negative search constraint on migration planning',
+    prompt: 'Plan a migration from PostgreSQL to SQLite for a small embedded device. I am asking for a plan, not actual research.',
+    expectedMode: 'writing',
+    shouldSearch: false,
+  },
+  {
+    id: 'eval-14',
+    name: 'Fictional prompt with negative search constraint',
+    prompt: "My fictional application's latest release date is August 17, 2027. Do not use web search.",
+    shouldSearch: false,
+  },
+  {
+    id: 'eval-15',
+    name: 'Cross-turn context contamination prevention',
+    prompt: 'How does Next.js handle API Route Handlers? Does it use route.js?',
+    contextEntities: ['Copper Finch', 'Bluefin Island'],
+    testContamination: true,
+  },
+  {
+    id: 'eval-16',
+    name: 'Source quality authority relevance gate',
+    prompt: 'Copper Finch API specification',
+    testRelevanceGate: true,
+  },
 ];
 
 let evalPass = 0;
@@ -824,6 +850,21 @@ for (const c of evalCases) {
       });
       assert.ok(fallback.includes('Degraded Fallback'));
       assert.ok(fallback.includes('https://dwavesys.com'));
+    } else if (c.testContamination) {
+      const plan = planResearchQueries(c.prompt, { contextEntities: c.contextEntities });
+      const planText = plan.queries.join(' ').toLowerCase();
+      assert.ok(!planText.includes('copper'), `Contaminated plan contained 'copper': ${planText}`);
+      assert.ok(!planText.includes('bluefin'), `Contaminated plan contained 'bluefin': ${planText}`);
+      assert.ok(planText.includes('next') || planText.includes('route'), `Plan lost core Next.js topic: ${planText}`);
+    } else if (c.testRelevanceGate) {
+      const nihResult = {
+        title: 'Dietary Copper - Health Professional Fact Sheet',
+        url: 'https://ods.od.nih.gov/factsheets/Copper-HealthProfessional/',
+        snippet: 'Copper is an essential trace mineral involved in energy production and iron metabolism.',
+      };
+      const scored = applySourceQuality(nihResult, c.prompt);
+      assert.equal(scored.sourceLabel, 'Weak', `Irrelevant .gov source should be Weak, got ${scored.sourceLabel}`);
+      assert.ok(scored.sourceScore <= 45, `Score should be <= 45, got ${scored.sourceScore}`);
     } else if (c.contextEntities) {
       const plan = planResearchQueries(c.prompt, { contextEntities: c.contextEntities });
       assert.ok(plan.queries.some((q) => q.toLowerCase().includes('ollama')));

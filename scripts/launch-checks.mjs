@@ -254,3 +254,13 @@ try {
 } catch {
   process.exit(1);
 }
+
+console.log('\nRunning RC-2 Verification tests...\n');
+try {
+  execFileSync(process.execPath, ['--loader', './scripts/loader.mjs', 'scripts/rc2-verification-tests.mjs'], {
+    cwd: root,
+    stdio: 'inherit',
+  });
+} catch {
+  process.exit(1);
+}

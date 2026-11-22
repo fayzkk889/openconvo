@@ -340,6 +340,27 @@ export async function POST(request: NextRequest) {
                 throw new Error('Model returned an empty response');
               }
 
+              // Terminal completion verification:
+              // Upstream stream must have explicitly confirmed completion via [DONE] / isDone,
+              // or emitted a known terminal finish_reason (e.g., 'stop', 'length', 'end_turn').
+              // If the connection dropped prematurely without confirmation:
+              const isConfirmedTerminal = streamSuccess || (Boolean(finishReason) && finishReason !== 'unknown');
+
+              if (!isConfirmedTerminal) {
+                if (emittedContent.trim().length >= 20) {
+                  commitQuotaOnce();
+                }
+                emitEvent({
+                  type: 'interrupted',
+                  model: usedModel,
+                  partialContent: emittedContent,
+                  reason: 'Upstream stream closed unexpectedly without terminal completion confirmation',
+                  finishReason: 'stream_closed',
+                });
+                controller.close();
+                return;
+              }
+
               // Verified completion!
               commitQuotaOnce();
               emitEvent({
@@ -403,11 +424,14 @@ export async function POST(request: NextRequest) {
               .slice(i + 1)
               .find((m) => !isModelCoolingDown(m));
             if (nextCandidate && attemptsCount < MAX_MODEL_ATTEMPTS && overallDeadline - Date.now() > 5000) {
+              const sanitizedReason = modelError instanceof OpenRouterError
+                ? formatOpenRouterError(modelError, tryModel)
+                : ((modelError as Error)?.message || 'Provider failed');
               emitEvent({
                 type: 'fallback',
                 fromModel: tryModel,
                 toModel: nextCandidate,
-                reason: (modelError as Error).message || 'Provider failed',
+                reason: sanitizedReason,
                 rateLimitedModels,
                 retryAfterSeconds,
               });
@@ -416,18 +440,22 @@ export async function POST(request: NextRequest) {
         }
 
         // All attempts failed
+        const cleanLastErrorMsg = lastError instanceof OpenRouterError
+          ? formatOpenRouterError(lastError)
+          : (lastError?.message || 'Inference failed across candidate models');
+
         if (researchMode && searchResults?.length) {
           commitQuotaOnce();
           const fallbackAnswer = buildResearchFallbackAnswer({
             question: lastUserQuestion(rawMessages),
             sources: searchResults,
-            reason: lastError?.message || 'the selected free model did not stream a response in time',
+            reason: cleanLastErrorMsg || 'the selected free model did not stream a response in time',
           });
           emitEvent({
             type: 'research_fallback',
             content: fallbackAnswer,
             model: usedModel,
-            reason: lastError?.message || 'Inference failed across candidate models',
+            reason: cleanLastErrorMsg || 'the selected free model did not stream a response in time',
           });
         } else {
           emitEvent({
@@ -468,9 +496,12 @@ export async function POST(request: NextRequest) {
       quotaFinalized = true;
     }
     console.error('Chat API error:', error);
-    const message = error instanceof Error ? error.message : 'Internal server error';
-    const status = isValidationError(message) ? 400 : 500;
-    return Response.json({ error: message }, { status });
+    const rawMsg = error instanceof Error ? error.message : 'Internal server error';
+    const cleanMessage = error instanceof OpenRouterError
+      ? formatOpenRouterError(error)
+      : (isValidationError(rawMsg) ? rawMsg : 'Internal server error');
+    const status = isValidationError(rawMsg) ? 400 : (error instanceof OpenRouterError ? error.status : 500);
+    return Response.json({ error: cleanMessage }, { status });
   }
 }
 

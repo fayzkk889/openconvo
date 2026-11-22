@@ -375,6 +375,30 @@ await test(15, 'consumeChatStream preserves partial content on interrupted strea
   assert.equal(result.errorMessage, 'Model connection lost');
 });
 
+await test('15-eof', 'consumeChatStream handles abrupt EOF without terminal event as interrupted', async () => {
+  const encoder = new TextEncoder();
+  const chunks = [
+    encoder.encode('data: {"type":"meta","requestId":"r-eof","model":"m1"}\n\n'),
+    encoder.encode('data: {"type":"delta","content":"Partial sentence before sudden connection drop"}\n\n'),
+    // Abrupt EOF: no complete event, no interrupted event, no [DONE]
+  ];
+
+  let readIdx = 0;
+  const mockReader = {
+    async read() {
+      if (readIdx >= chunks.length) return { done: true, value: undefined };
+      return { done: false, value: chunks[readIdx++] };
+    },
+    releaseLock() {},
+  };
+
+  const result = await consumeChatStream(mockReader, 'm1');
+  assert.equal(result.status, 'interrupted', 'Status must be interrupted when stream ends abruptly');
+  assert.notEqual(result.status, 'complete', 'Status must NEVER be complete on missing terminal event');
+  assert.equal(result.fullContent, 'Partial sentence before sudden connection drop', 'Partial content must be preserved');
+  assert.equal(result.finishReason, 'stream_closed');
+});
+
 // =========================================================================
 // SECTION 4: BOUNDED MODEL FALLBACK & TIME-BUDGETING (STEP 4)
 // =========================================================================

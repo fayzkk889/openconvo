@@ -100,10 +100,18 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
   const queryTerms = importantTerms(query);
   const haystack = `${result.title} ${result.snippet} ${host} ${path}`.toLowerCase();
   const overlap = queryTerms.filter((term) => haystack.includes(term)).length;
+  const isMultiTermQuery = queryTerms.length >= 2;
+  const isPoorOverlap = isMultiTermQuery ? overlap < 2 : overlap === 0;
+
   const reasons: string[] = [];
-  let score = 50;
-  const isPrimaryHost = PRIMARY_HOST_PATTERNS.some((pattern) => pattern.test(host));
-  const isExactTopicHost = queryTerms.some((term) =>
+  let score = isPoorOverlap ? 30 : 50;
+
+  if (isPoorOverlap) {
+    reasons.push(overlap === 0 ? 'no query term match' : 'isolated single-term match');
+  }
+
+  const isPrimaryHost = !isPoorOverlap && PRIMARY_HOST_PATTERNS.some((pattern) => pattern.test(host));
+  const isExactTopicHost = !isPoorOverlap && queryTerms.some((term) =>
     host === `${term}.com` ||
     host === `${term}.org` ||
     host === `${term}.net` ||
@@ -238,7 +246,10 @@ export function applySourceQuality(result: SearchResult, query: string): SearchR
     reasons.push('limited preview text');
   }
 
-  const safeScore = Math.max(0, Math.min(100, Math.round(score)));
+  let safeScore = Math.max(0, Math.min(100, Math.round(score)));
+  if (isPoorOverlap) {
+    safeScore = Math.min(safeScore, 45);
+  }
   return {
     ...result,
     sourceScore: safeScore,

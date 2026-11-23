@@ -6,6 +6,7 @@ const TAVILY_BASE = 'https://api.tavily.com';
 const BING_SEARCH = 'https://www.bing.com/search';
 const DUCKDUCKGO_HTML = 'https://html.duckduckgo.com/html/';
 const DUCKDUCKGO_LITE = 'https://lite.duckduckgo.com/lite/';
+const WIKIPEDIA_API = 'https://en.wikipedia.org/w/api.php';
 const DEFAULT_USER_AGENT = 'OpenConvo/0.1 (+https://openconvo.vercel.app)';
 const SEARCH_TIMEOUT_MS = 8000;
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -175,7 +176,97 @@ function getSearchProviders(): SearchProvider[] {
     duckDuckGoProvider,
     duckDuckGoLiteProvider,
     bingHtmlProvider,
+    wikipediaProvider,
   ];
+}
+
+/**
+ * Keyless, documented API that works from cloud IPs (unlike HTML scraping of
+ * DuckDuckGo, which returns 403 to Vercel). Returns each article's lead section
+ * as plain text, which gives research answers real content to cite while page
+ * extraction is disabled. Encyclopedic coverage only, so it is tried last.
+ */
+const wikipediaProvider: SearchProvider = {
+  id: 'wikipedia',
+  available: () => true,
+  async search(context, signal) {
+    const params = new URLSearchParams({
+      action: 'query',
+      format: 'json',
+      formatversion: '2',
+      generator: 'search',
+      gsrsearch: context.query.slice(0, 300),
+      gsrlimit: context.mode === 'search' ? '3' : '5',
+      gsrnamespace: '0',
+      prop: 'extracts|info',
+      exintro: '1',
+      explaintext: '1',
+      exlimit: '5',
+      exchars: '1200',
+      inprop: 'url',
+      redirects: '1',
+      origin: '*',
+    });
+    const response = await fetch(`${WIKIPEDIA_API}?${params.toString()}`, {
+      signal,
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': DEFAULT_USER_AGENT,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Wikipedia search error ${response.status}`);
+    }
+
+    return {
+      provider: 'wikipedia',
+      results: parseWikipediaResponse(await response.json(), context.query),
+    };
+  },
+};
+
+const WIKIPEDIA_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'what', 'which', 'how', 'why', 'who', 'are', 'was', 'were', 'does', 'did',
+  'about', 'from', 'into', 'that', 'this', 'these', 'those', 'between', 'latest', 'best', 'can', 'you',
+  'tell', 'give', 'explain', 'compare', 'difference', 'vs', 'versus', 'use', 'using', 'should',
+]);
+
+function significantTerms(query: string): string[] {
+  return Array.from(new Set(
+    query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length >= 3 && !WIKIPEDIA_STOPWORDS.has(t))
+  ));
+}
+
+/**
+ * Wikipedia's full-text search returns loose matches (a query about React
+ * server components also returns ReactOS). Keep only articles that contain at
+ * least half of the query's significant terms as whole words.
+ */
+export function parseWikipediaResponse(data: unknown, query = ''): SearchResult[] {
+  const terms = significantTerms(query);
+  const needed = Math.ceil(terms.length / 2);
+  const pages = (data as { query?: { pages?: unknown } })?.query?.pages;
+  if (!Array.isArray(pages)) return [];
+  return pages
+    .filter((page): page is { title?: unknown; fullurl?: unknown; extract?: unknown; index?: unknown } =>
+      Boolean(page) && typeof page === 'object')
+    .filter((page) => typeof page.extract === 'string' && page.extract.trim().length > 0)
+    .filter((page) => {
+      if (!terms.length) return true;
+      const words = new Set(`${page.title} ${page.extract}`.toLowerCase().split(/[^\p{L}\p{N}]+/u));
+      return terms.filter((term) => words.has(term)).length >= needed;
+    })
+    .sort((a, b) => (Number(a.index) || 0) - (Number(b.index) || 0))
+    .flatMap((page) => {
+      const extract = String(page.extract).replace(/\s+/g, ' ').trim();
+      return normalizeResult({
+        title: typeof page.title === 'string' ? `${page.title} - Wikipedia` : undefined,
+        url: page.fullurl,
+        snippet: extract,
+        content: extract,
+      });
+    });
 }
 
 const tavilyProvider: SearchProvider = {

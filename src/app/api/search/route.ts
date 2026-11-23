@@ -6,6 +6,7 @@ import { generateResearchPlan } from '@/lib/openrouter';
 import { stripLeadingGreeting } from '@/lib/tasks';
 import { getUsageIdentity } from '@/lib/request-identity';
 import { isHostedFreeEnabled } from '@/lib/hosted-mode';
+import { reserveQuota, releaseQuota, quotaRefusalMessage, QuotaReservation } from '@/lib/hosted-quota';
 
 export const maxDuration = 60;
 
@@ -22,15 +23,9 @@ interface HostedSearchQuota {
   remaining: number;
   resetAt: number;
   identity?: string;
+  reservation?: QuotaReservation;
 }
 
-interface HostedSearchUsageEntry {
-  count: number;
-  inFlight: number;
-  resetAt: number;
-}
-
-const hostedSearchUsage = new Map<string, HostedSearchUsageEntry>();
 
 export async function POST(request: NextRequest) {
   // Step 5 Invariant: Request payload size bounds
@@ -86,16 +81,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    hostedQuota = getHostedSearchQuotaStatus(request, key);
+    hostedQuota = await getHostedSearchQuotaStatus(request, key);
     if (!hostedQuota.allowed) {
+      const refused = hostedQuota;
+      hostedQuota = null;
       return Response.json(
         {
-          error: `Hosted search daily limit reached. Add your own Tavily key in Settings or try again after ${new Date(hostedQuota.resetAt).toLocaleString()}.`,
-          hostedSearchUsage: publicHostedSearchUsage(hostedQuota),
+          error: refused.reservation
+            ? quotaRefusalMessage(refused.reservation, 'search')
+            : 'Hosted search daily limit reached. Add your own Tavily key in Settings.',
+          hostedSearchUsage: publicHostedSearchUsage(refused),
         },
         {
-          status: 429,
-          headers: hostedSearchHeaders(hostedQuota.mode, hostedQuota),
+          status: refused.reservation?.reason === 'store-unavailable' ? 503 : 429,
+          headers: hostedSearchHeaders(refused.mode, refused),
         }
       );
     }
@@ -300,7 +299,7 @@ function isConversationalSearchQuery(query: string): boolean {
   return /\b(?:can u|can you|tell me|give me|please|some)\b/i.test(query);
 }
 
-function getHostedSearchQuotaStatus(request: NextRequest, clientKey: string | null): HostedSearchQuota {
+async function getHostedSearchQuotaStatus(request: NextRequest, clientKey: string | null): Promise<HostedSearchQuota> {
   if (clientKey) {
     return {
       allowed: true,
@@ -311,69 +310,34 @@ function getHostedSearchQuotaStatus(request: NextRequest, clientKey: string | nu
     };
   }
 
-  const limit = getHostedSearchDailyLimit();
   const identity = getUsageIdentity(request.headers);
-  const now = Date.now();
-  const resetAt = getNextUtcMidnight(now);
-  const existing = hostedSearchUsage.get(identity);
-  const entry = existing && existing.resetAt > now
-    ? existing
-    : { count: 0, inFlight: 0, resetAt };
-
-  // Step 5 Invariant: Concurrent reservation limits
-  if (entry.count + entry.inFlight >= limit) {
-    hostedSearchUsage.set(identity, entry);
-    return {
-      allowed: false,
-      mode: 'hosted-search',
-      limit,
-      remaining: 0,
-      resetAt: entry.resetAt,
-      identity,
-    };
-  }
-
-  // Reserve slot
-  entry.inFlight += 1;
-  hostedSearchUsage.set(identity, entry);
-  pruneHostedSearchUsage(now);
-
+  const reservation = await reserveQuota('search', identity, {
+    perIdentity: getHostedSearchDailyLimit(),
+    // The deployment-wide cap protects the shared Tavily key and hosted planner.
+    // When those are not lent out (BYOK-only), keyless scraping is only rate
+    // limited per visitor.
+    global: isHostedFreeEnabled() ? getHostedSearchGlobalDailyLimit() : Number.MAX_SAFE_INTEGER,
+  });
   return {
-    allowed: true,
+    allowed: reservation.allowed,
     mode: 'hosted-search',
-    limit,
-    remaining: Math.max(limit - (entry.count + entry.inFlight), 0),
-    resetAt: entry.resetAt,
+    limit: reservation.limit,
+    remaining: reservation.remaining,
+    resetAt: reservation.resetAt,
     identity,
+    reservation,
   };
 }
 
+/** Reservations count when made; committing only reports the current usage. */
 function commitHostedSearchQuota(quota: HostedSearchQuota): HostedSearchQuota {
-  if (quota.mode === 'byok' || !quota.identity) return quota;
-
-  const now = Date.now();
-  const existing = hostedSearchUsage.get(quota.identity);
-  const entry = existing && existing.resetAt > now
-    ? existing
-    : { count: 0, inFlight: 0, resetAt: getNextUtcMidnight(now) };
-  entry.inFlight = Math.max(0, entry.inFlight - 1);
-  entry.count += 1;
-  hostedSearchUsage.set(quota.identity, entry);
-
-  return {
-    ...quota,
-    allowed: entry.count <= quota.limit,
-    remaining: Math.max(quota.limit - entry.count, 0),
-    resetAt: entry.resetAt,
-  };
+  return quota;
 }
 
+/** Refund the visitor's slot for a search that failed or was cancelled. */
 function releaseHostedSearchQuota(quota: HostedSearchQuota): void {
-  if (quota.mode === 'byok' || !quota.identity) return;
-  const existing = hostedSearchUsage.get(quota.identity);
-  if (existing) {
-    existing.inFlight = Math.max(0, existing.inFlight - 1);
-  }
+  if (quota.mode === 'byok' || !quota.reservation) return;
+  void releaseQuota(quota.reservation);
 }
 
 function publicHostedSearchUsage(quota: HostedSearchQuota): Omit<HostedSearchQuota, 'identity'> | undefined {
@@ -410,15 +374,8 @@ function getHostedSearchDailyLimit(): number {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : 15;
 }
 
-function getNextUtcMidnight(now: number): number {
-  const date = new Date(now);
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1);
-}
-
-function pruneHostedSearchUsage(now: number): void {
-  for (const [identity, usage] of hostedSearchUsage.entries()) {
-    if (usage.resetAt <= now) {
-      hostedSearchUsage.delete(identity);
-    }
-  }
+/** Deployment-wide cap on hosted searches (each may also spend one hosted planner call). */
+function getHostedSearchGlobalDailyLimit(): number {
+  const value = Number(process.env.OPENCONVO_HOSTED_SEARCH_GLOBAL_DAILY_LIMIT || 20);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 20;
 }

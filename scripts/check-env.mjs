@@ -57,6 +57,31 @@ if (hasValue('OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT')) {
   }
 }
 
+for (const name of ['OPENCONVO_HOSTED_FREE_GLOBAL_DAILY_LIMIT', 'OPENCONVO_HOSTED_SEARCH_GLOBAL_DAILY_LIMIT']) {
+  if (hasValue(name)) {
+    const limit = Number(process.env[name]);
+    if (!Number.isFinite(limit) || limit <= 0) {
+      failures.push(`${name} must be a positive number.`);
+    }
+  }
+}
+
+const hostedSetting = (process.env.OPENCONVO_HOSTED_FREE || '').trim().toLowerCase();
+if (hostedSetting && hostedSetting !== 'on' && hostedSetting !== 'off') {
+  failures.push('OPENCONVO_HOSTED_FREE must be "on" or "off" when set.');
+}
+const storeUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const storeToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+if (Boolean(storeUrl) !== Boolean(storeToken)) {
+  failures.push('Set both the quota store URL and token (UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN).');
+}
+if (storeUrl && !validUrl(storeUrl)) {
+  failures.push('The quota store URL must be a valid https URL.');
+}
+if (hostedSetting === 'on' && !storeUrl) {
+  warnings.push('OPENCONVO_HOSTED_FREE=on without a shared quota store: Vercel production will stay BYOK-only; other hosts count quotas per instance only.');
+}
+
 if (hasValue('NEXT_PUBLIC_GITHUB_URL') && !validUrl(process.env.NEXT_PUBLIC_GITHUB_URL)) {
   failures.push('NEXT_PUBLIC_GITHUB_URL must be a valid https URL.');
 }

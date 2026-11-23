@@ -13,6 +13,7 @@ import { selectBoundedContext } from '@/lib/context-usage';
 import { SseChunkParser, parseOpenRouterPayload } from '@/lib/sse-parser';
 import { getUsageIdentity } from '@/lib/request-identity';
 import { hostedOpenRouterKey } from '@/lib/hosted-mode';
+import { reserveQuota, releaseQuota, quotaRefusalMessage, QuotaReservation } from '@/lib/hosted-quota';
 
 export const maxDuration = 60;
 
@@ -29,7 +30,6 @@ const ATTEMPT_CONNECT_TIMEOUT_MS = 10 * 1000;
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 15 * 1000;
 
 const modelCooldowns = new Map<string, number>();
-const hostedUsage = new Map<string, { count: number; resetAt: number; inFlight: number }>();
 type UsageMode = 'byok' | 'hosted-free';
 type HostedQuota = {
   allowed: boolean;
@@ -38,6 +38,7 @@ type HostedQuota = {
   remaining: number;
   resetAt: number;
   identity?: string;
+  reservation?: QuotaReservation;
 };
 
 export async function POST(request: NextRequest) {
@@ -88,18 +89,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const hostedQuota = reserveHostedQuota(request, key);
+    const hostedQuota = await reserveHostedQuota(request, key);
     reservedQuota = hostedQuota;
 
     if (!hostedQuota.allowed) {
+      reservedQuota = null;
       return Response.json(
         {
-          error: `Hosted free mode daily limit reached. Add your own OpenRouter key in Settings or try again after ${new Date(hostedQuota.resetAt).toLocaleString()}.`,
+          error: hostedQuota.reservation
+            ? quotaRefusalMessage(hostedQuota.reservation, 'chat')
+            : 'Hosted free mode daily limit reached. Add your own OpenRouter key in Settings.',
           rateLimitedModels: [],
           hostedUsage: publicHostedUsage(hostedQuota),
         },
         {
-          status: 429,
+          status: hostedQuota.reservation?.reason === 'store-unavailable' ? 503 : 429,
           headers: usageHeaders('hosted-free', hostedQuota),
         }
       );
@@ -600,7 +604,7 @@ function getClientOpenRouterKey(request: NextRequest): string | null {
   return key || null;
 }
 
-function getHostedQuotaStatus(request: NextRequest, clientKey: string | null): HostedQuota {
+async function reserveHostedQuota(request: NextRequest, clientKey: string | null): Promise<HostedQuota> {
   if (clientKey) {
     return {
       allowed: true,
@@ -611,70 +615,31 @@ function getHostedQuotaStatus(request: NextRequest, clientKey: string | null): H
     };
   }
 
-  const limit = getHostedFreeDailyLimit();
   const identity = getUsageIdentity(request.headers);
-  const now = Date.now();
-  const resetAt = getNextUtcMidnight(now);
-  const existing = hostedUsage.get(identity);
-  const entry = existing && existing.resetAt > now ? existing : { count: 0, resetAt, inFlight: 0 };
-
-  if (entry.count + entry.inFlight >= limit) {
-    hostedUsage.set(identity, entry);
-    return {
-      allowed: false,
-      mode: 'hosted-free',
-      limit,
-      remaining: 0,
-      resetAt: entry.resetAt,
-      identity,
-    };
-  }
-
-  entry.inFlight += 1;
-  hostedUsage.set(identity, entry);
-  pruneHostedUsage(now);
-
+  const reservation = await reserveQuota('chat', identity, {
+    perIdentity: getHostedFreeDailyLimit(),
+    global: getHostedFreeGlobalDailyLimit(),
+  });
   return {
-    allowed: true,
+    allowed: reservation.allowed,
     mode: 'hosted-free',
-    limit,
-    remaining: Math.max(limit - (entry.count + entry.inFlight), 0),
-    resetAt: entry.resetAt,
+    limit: reservation.limit,
+    remaining: reservation.remaining,
+    resetAt: reservation.resetAt,
     identity,
+    reservation,
   };
 }
 
-const reserveHostedQuota = getHostedQuotaStatus;
-
+/** Refund the visitor's slot for a request that produced nothing. */
 function releaseHostedQuota(quota: HostedQuota): void {
-  if (quota.mode === 'byok' || !quota.identity) return;
-  const existing = hostedUsage.get(quota.identity);
-  if (existing && existing.inFlight > 0) {
-    existing.inFlight -= 1;
-  }
+  if (quota.mode === 'byok' || !quota.reservation) return;
+  void releaseQuota(quota.reservation);
 }
 
+/** Reservations count when made; committing only reports the current usage. */
 function commitHostedQuota(quota: HostedQuota): HostedQuota {
-  if (quota.mode === 'byok' || !quota.identity) return quota;
-
-  const now = Date.now();
-  const existing = hostedUsage.get(quota.identity);
-  const entry =
-    existing && existing.resetAt > now
-      ? existing
-      : { count: 0, resetAt: getNextUtcMidnight(now), inFlight: 1 };
-  if (entry.inFlight > 0) {
-    entry.inFlight -= 1;
-  }
-  entry.count += 1;
-  hostedUsage.set(quota.identity, entry);
-
-  return {
-    ...quota,
-    allowed: entry.count <= quota.limit,
-    remaining: Math.max(quota.limit - entry.count, 0),
-    resetAt: entry.resetAt,
-  };
+  return quota;
 }
 
 function publicHostedUsage(quota: HostedQuota): Omit<HostedQuota, 'identity'> | undefined {
@@ -711,17 +676,14 @@ function getHostedFreeDailyLimit(): number {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : 20;
 }
 
-function getNextUtcMidnight(now: number): number {
-  const date = new Date(now);
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1);
-}
-
-function pruneHostedUsage(now: number): void {
-  for (const [identity, usage] of hostedUsage.entries()) {
-    if (usage.resetAt <= now) {
-      hostedUsage.delete(identity);
-    }
-  }
+/**
+ * Deployment-wide cap for all keyless visitors together. OpenRouter free keys
+ * allow about 50 requests a day (failed ones included), and hosted research
+ * planning spends from the same key, so the default leaves headroom.
+ */
+function getHostedFreeGlobalDailyLimit(): number {
+  const value = Number(process.env.OPENCONVO_HOSTED_FREE_GLOBAL_DAILY_LIMIT || 30);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 30;
 }
 
 function validateChatBody(body: unknown): {

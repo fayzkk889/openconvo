@@ -26,3 +26,10 @@ Real provider streaming/latency, Tavily/keyless search results and source panels
 | PDF under CSP | PASS | Worker loaded from `/api/pdf-worker`; synthetic PDF parsed and attached. |
 | BYOK-only messaging | PASS | `/api/config` reports hosted off; composer reads "This deployment uses your own free OpenRouter key…". |
 | Vercel Preview (`openconvo-git-audit-rc-3-cloud-tanashahh.vercel.app`) | BLOCKED | Redirects to Vercel login (Preview SSO). The in-app browser has no Vercel session; credentials were not entered by the agent. |
+
+## Session 3 — Vercel Preview (live provider) and production
+| Environment | Check | Result |
+|---|---|---|
+| Preview `ae2aae3` | Test A + follow-up, real 429 → fallback, Test B live research, Test H PDF, Test I injection, Stop + refresh | PASS (details in `CLOUD_RELEASE_READINESS.md`) |
+| Preview `f4299ec` | CSP with Vercel toolbar, model label, live coding prompt | PASS |
+| Production `c21e9fd` | `/app` load, BYOK notice, no console errors; API smoke (hosted off, keyless 401s, CSP, models, worker) | PASS — no provider requests made |

@@ -31,3 +31,11 @@ Review the diff, then commit on `audit/rc-3-cloud` and deploy to a Preview with 
 - RC-3 suite 26/26; typecheck, `npm test`, build all exit 0.
 - **Not yet done:** CSP not checked in a browser for violations; Playwright e2e suite not written (install reverted); branch not pushed; no Preview deployed; no live-provider smoke test; no production release.
 - **Next exact action:** run the app locally and check the console for CSP violations → push `audit/rc-3-cloud` → open the Vercel Preview (SSO) → minimal live smoke test using hosted mode on Preview → production only if all conditions in CLOUD_RELEASE_READINESS.md hold.
+
+## Session 3 (2026-11-23) — released
+- Preview `openconvo-git-audit-rc-3-cloud-tanashahh.vercel.app` verified live (real OpenRouter + Tavily via Preview hosted mode): Tests A, B, H, I, real 429 fallback, Stop + refresh, and a coding prompt on the exact release commit `f4299ec`.
+- Fixed from Preview: CSP blocked Vercel's Preview toolbar (Preview-only allowance added); duplicate model label for models outside the curated list.
+- PR https://github.com/fayzkk889/openconvo/pull/1 merged as `c21e9fd` on `main`; Vercel production deployment completed (https://vercel.com/tanashahh/openconvo/6FDTCpRPx9HRH1jaNBRcpYq3QKhA).
+- Production smoke (no provider spend): `/api/config` hosted off; keyless `/api/chat` and `/api/search` → 401 with guidance; strict CSP; 12 `:free` models; PDF worker 200; `/app` loads with BYOK notice and no console errors.
+- Pre-release production was `77862a9`. Rollback: Vercel Instant Rollback to that deployment, or `git revert -m 1 c21e9fd` on `main`.
+- Open follow-ups (not blockers): shared atomic quota store before hosted-free can be public; Tavily-less BYOK search quality on Vercel (DuckDuckGo 403); Playwright e2e suite; real OS drag-drop/paste/IME coverage; a live BYOK call with a real visitor key.

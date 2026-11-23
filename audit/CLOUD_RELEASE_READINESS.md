@@ -33,7 +33,7 @@ What this proves: the full server path (live catalog, zero-price routing, SSE pa
 | Preview validated on the exact release commit | Met — `f4299ec` Preview: CSP header served, Vercel toolbar loads, no new violations, live coding prompt routed `code` and completed `stop` with correct TypeScript |
 
 ## Known limitations at launch
-- BYOK users without a Tavily key get keyless search; DuckDuckGo returns 403 to Vercel servers, so results rely on Bing HTML and seeded sources. Add a Tavily key in Settings for reliable research.
+- BYOK users without a Tavily key get keyless search. Measured on the RC-4 Preview (2026-11-24): DuckDuckGo HTML and Lite return 403 to Vercel, Bing HTML works, and the Wikipedia API works (encyclopedic topics only). Add a Tavily key in Settings for the most reliable research.
 - Page extraction is off by default (`OPENCONVO_ENABLE_PAGE_EXTRACTION`); research cites search snippets.
 - Free models occasionally cite document IDs at a finer granularity than supplied (e.g. `[D1:L2]` for excerpt `D1:L1-L7`).
 - Real OS drag-and-drop, clipboard paste, and IME were not exercised by automation.
@@ -42,3 +42,9 @@ What this proves: the full server path (live catalog, zero-price routing, SSE pa
 - Pre-release production: commit `77862a9` (Vercel production deployment of 2026-06-21).
 - Fastest: Vercel dashboard → Deployments → previous production deployment → Instant Rollback (owner action).
 - Agent-executable: `git revert -m 1 <merge-commit>` on `main` and push; Vercel redeploys the previous code.
+
+## RC-4 Preview verification (2026-11-24, PR #2, `openconvo-git-feat-rc-4-followups-tanashahh.vercel.app`)
+- `/api/config`: hosted on (Preview), as designed.
+- Keyless search from Vercel (Tavily refused via a deliberately invalid probe key): research queries returned 200 with providers `bing-html,wikipedia`; DuckDuckGo 403; Wikipedia articles ranked into results for a history query; no Wikipedia errors.
+- Hosted chat through the new quota module: `X-OpenConvo-Mode: hosted-free`, limit 20, remaining 19 after reservation. The provider itself returned real 429s for both Gemma models, surfaced as a clean error event (no fabricated answer). No further requests were spent.
+- Production remains BYOK-only: no quota store is configured, so `OPENCONVO_HOSTED_FREE` cannot enable hosted mode there.

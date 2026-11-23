@@ -12,6 +12,7 @@ import { buildDocumentAppendixIfMissing } from '@/lib/document-citations';
 import { selectBoundedContext } from '@/lib/context-usage';
 import { SseChunkParser, parseOpenRouterPayload } from '@/lib/sse-parser';
 import { getUsageIdentity } from '@/lib/request-identity';
+import { hostedOpenRouterKey } from '@/lib/hosted-mode';
 
 export const maxDuration = 60;
 
@@ -80,7 +81,7 @@ export async function POST(request: NextRequest) {
     if (!hasOpenRouterKey(key)) {
       return Response.json(
         {
-          error: 'OpenRouter API key is missing. Add your key in Settings or set OPENROUTER_API_KEY in .env.local.',
+          error: 'This deployment uses your own OpenRouter key. Add a free key in Settings to start chatting.',
           rateLimitedModels: [],
         },
         { status: 401 }
@@ -587,7 +588,7 @@ function isValidationError(message: string): boolean {
 }
 
 function hasOpenRouterKey(clientKey: string | null): boolean {
-  return Boolean(clientKey || process.env.OPENROUTER_API_KEY);
+  return Boolean(clientKey || hostedOpenRouterKey());
 }
 
 function isOpenRouterAuthError(error: OpenRouterError): boolean {

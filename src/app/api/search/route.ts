@@ -5,6 +5,7 @@ import { planResearchQueries, detectEvidenceGaps } from '@/lib/research-planner'
 import { generateResearchPlan } from '@/lib/openrouter';
 import { stripLeadingGreeting } from '@/lib/tasks';
 import { getUsageIdentity } from '@/lib/request-identity';
+import { isHostedFreeEnabled } from '@/lib/hosted-mode';
 
 export const maxDuration = 60;
 
@@ -76,6 +77,15 @@ export async function POST(request: NextRequest) {
       ? contextEntities.filter((e): e is string => typeof e === 'string' && e.trim().length > 0).slice(0, 5)
       : undefined;
 
+    // Without hosted capacity, search is only for visitors who brought their own
+    // keys: an unauthenticated endpoint would otherwise be an open scraping proxy.
+    if (!isHostedFreeEnabled() && !key && !openrouterKey) {
+      return Response.json(
+        { error: 'Web search needs your own OpenRouter or Tavily key on this deployment. Add one in Settings.' },
+        { status: 401 }
+      );
+    }
+
     hostedQuota = getHostedSearchQuotaStatus(request, key);
     if (!hostedQuota.allowed) {
       return Response.json(
@@ -118,7 +128,7 @@ export async function POST(request: NextRequest) {
           // OpenRouter key it runs on the shared hosted key, which is only allowed
           // when this search is metered against the hosted search quota. A
           // client-supplied Tavily key alone must not unlock hosted model calls.
-          allowModelPlanner: Boolean(openrouterKey) || hostedQuota.mode === 'hosted-search',
+          allowModelPlanner: Boolean(openrouterKey) || (hostedQuota.mode === 'hosted-search' && isHostedFreeEnabled()),
         })
       : null;
 

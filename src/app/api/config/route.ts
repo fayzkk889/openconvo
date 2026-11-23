@@ -1,10 +1,11 @@
 import { DeploymentConfig } from '@/types/deployment';
+import { hostedOpenRouterKey, isHostedFreeEnabled } from '@/lib/hosted-mode';
 
 export function GET() {
   const config: DeploymentConfig = {
-    hostedFreeModeAvailable: Boolean(process.env.OPENROUTER_API_KEY),
+    hostedFreeModeAvailable: Boolean(hostedOpenRouterKey()),
     hostedFreeDailyLimit: getHostedFreeDailyLimit(),
-    hostedSearchAvailable: true,
+    hostedSearchAvailable: isHostedFreeEnabled(),
     hostedSearchDailyLimit: getHostedSearchDailyLimit(),
   };
 

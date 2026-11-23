@@ -132,7 +132,7 @@ export function EmptyState({
                     <p className="empty-setup-copy mt-1 max-w-full text-wrap text-sm leading-6 text-[var(--color-text-secondary)]">
                       {accessMode === 'hosted-free'
                         ? `No account is required. This hosted instance includes shared free capacity: ${hostedFreeDailyLimit} messages per day.`
-                        : 'No account is required. Add your own free API keys locally, or use server environment keys if this instance already has them.'}
+                        : 'This deployment is bring-your-own-key: shared free capacity is turned off because it cannot be fairly limited across visitors. Create a free OpenRouter key and add it in Settings. Keys are stored only in this browser and sent only with your own requests.'}
                     </p>
                   </div>
                   <button
@@ -156,7 +156,7 @@ export function EmptyState({
                   <div className="flex min-w-0 items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
                     <CheckCircle2 className="h-4 w-4 text-[var(--color-accent)]" />
                     <span className="min-w-0 truncate">
-                      {hasTavilyKey ? 'Tavily search saved' : 'Keyless web search ready'}
+                      {hasTavilyKey ? 'Tavily search saved' : accessMode === 'missing-key' ? 'Web search available after adding a key' : 'Keyless web search ready'}
                     </span>
                   </div>
                 </div>

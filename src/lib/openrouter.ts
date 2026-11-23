@@ -1,6 +1,7 @@
 import { AIModel } from '@/types/models';
 import { CURATED_FREE_MODELS, FALLBACK_CHAIN, isFreeModelId } from './models';
 import { buildConversationTitle } from './title';
+import { hostedOpenRouterKey } from './hosted-mode';
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 const OPENROUTER_REQUEST_TIMEOUT_MS = 45 * 1000;
@@ -138,8 +139,8 @@ function parseOpenRouterErrorBody(body: string): {
 
 function getApiKey(clientKey?: string | null): string {
   if (clientKey) return clientKey;
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key) throw new Error('OPENROUTER_API_KEY is not set');
+  const key = hostedOpenRouterKey();
+  if (!key) throw new Error('No OpenRouter key available for this request');
   return key;
 }
 
@@ -463,7 +464,7 @@ async function fetchLiveFreeModels(apiKey?: string | null, timeoutMs = 8000): Pr
     };
     
     // Add auth only if available to prevent throwing errors on initial load
-    const key = apiKey || process.env.OPENROUTER_API_KEY;
+    const key = apiKey || hostedOpenRouterKey();
     if (key) {
       headers['Authorization'] = `Bearer ${key}`;
     }

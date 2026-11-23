@@ -23,3 +23,11 @@
 
 ## Next exact action
 Review the diff, then commit on `audit/rc-3-cloud` and deploy to a Preview with a BYOK key to run the real-provider smoke list in `CLOUD_RELEASE_READINESS.md`.
+
+## Session 2 (2026-11-23) — commit after 300549e
+- Launch mode decided: **BYOK-only for public deployments** (`src/lib/hosted-mode.ts`). Server keys are lent only with `OPENCONVO_HOSTED_FREE=on` or on SSO-protected Vercel Previews. `/api/search` returns 401 for keyless visitors when hosted mode is off. UI explains BYOK-only.
+- Production today (`77862a9`, June) still has hosted-free publicly on with per-instance quotas; this branch fixes that once released.
+- Added CSP (`next.config.ts`): `connect-src 'self'`, `img-src 'self' data: blob:` (blocks markdown-image exfiltration), Google Fonts allowed.
+- RC-3 suite 26/26; typecheck, `npm test`, build all exit 0.
+- **Not yet done:** CSP not checked in a browser for violations; Playwright e2e suite not written (install reverted); branch not pushed; no Preview deployed; no live-provider smoke test; no production release.
+- **Next exact action:** run the app locally and check the console for CSP violations → push `audit/rc-3-cloud` → open the Vercel Preview (SSO) → minimal live smoke test using hosted mode on Preview → production only if all conditions in CLOUD_RELEASE_READINESS.md hold.

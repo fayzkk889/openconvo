@@ -302,7 +302,7 @@ export function Composer({
           <span className="min-w-0">
             {accessMode === 'byok' && 'Using your OpenRouter key'}
             {accessMode === 'hosted-free' && `Hosted free mode: ${hostedFreeDailyLimit} messages/day`}
-            {accessMode === 'missing-key' && 'Add an OpenRouter key in Settings to chat'}
+            {accessMode === 'missing-key' && 'This deployment uses your own free OpenRouter key; add it in Settings to chat. Keys stay in this browser.'}
             {hostedSearchAvailable && (
               <>
                 {' '}

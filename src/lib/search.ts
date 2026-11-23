@@ -1,5 +1,6 @@
 import { SearchResponse, SearchResult } from '@/types/search';
 import { rankSearchResults } from '@/lib/source-quality';
+import { hostedTavilyKey } from '@/lib/hosted-mode';
 
 const TAVILY_BASE = 'https://api.tavily.com';
 const BING_SEARCH = 'https://www.bing.com/search';
@@ -50,7 +51,7 @@ export async function searchWeb(
   };
   const providerErrors: string[] = [];
   const providerResults: SearchProviderResult[] = [];
-  const hasConfiguredSearchProvider = Boolean(clientKey || process.env.TAVILY_API_KEY || process.env.SEARXNG_URL);
+  const hasConfiguredSearchProvider = Boolean(clientKey || hostedTavilyKey() || process.env.SEARXNG_URL);
 
   for (const provider of getSearchProviders()) {
     if (signal?.aborted) break;
@@ -179,9 +180,9 @@ function getSearchProviders(): SearchProvider[] {
 
 const tavilyProvider: SearchProvider = {
   id: 'tavily',
-  available: (context) => Boolean(context.clientTavilyKey || process.env.TAVILY_API_KEY),
+  available: (context) => Boolean(context.clientTavilyKey || hostedTavilyKey()),
   async search(context, signal) {
-    const apiKey = context.clientTavilyKey || process.env.TAVILY_API_KEY;
+    const apiKey = context.clientTavilyKey || hostedTavilyKey();
     if (!apiKey) throw new Error('Tavily key is missing');
 
     const response = await fetch(`${TAVILY_BASE}/search`, {

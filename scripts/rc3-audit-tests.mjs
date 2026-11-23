@@ -10,6 +10,8 @@ import { NextRequest } from 'next/server';
 import { POST as chatPOST } from '@/app/api/chat/route';
 import { POST as searchPOST } from '@/app/api/search/route';
 import { getUsageIdentity } from '@/lib/request-identity';
+import { isHostedFreeEnabled } from '@/lib/hosted-mode';
+import { GET as configGET } from '@/app/api/config/route';
 import { sanitizeProviderMessage } from '@/lib/openrouter';
 import { selectCandidateModels, FALLBACK_CHAIN, CURATED_FREE_MODELS, DEFAULT_MODEL_ID } from '@/lib/models';
 import { SseChunkParser, consumeChatStream } from '@/lib/sse-parser';
@@ -217,6 +219,7 @@ await test('Quota identity ignores client-controlled cf-connecting-ip / x-real-i
 
 await test('Hosted chat quota cannot be bypassed by rotating cf-connecting-ip (route level)', async () => {
   process.env.OPENROUTER_API_KEY = 'sk-or-hosted-test';
+  process.env.OPENCONVO_HOSTED_FREE = 'on';
   process.env.OPENCONVO_HOSTED_FREE_DAILY_LIMIT = '1';
   try {
     installFetch(() => new Response(sseBody([delta('ok', 'stop'), 'data: [DONE]\n\n']), { status: 200 }));
@@ -228,6 +231,7 @@ await test('Hosted chat quota cannot be bypassed by rotating cf-connecting-ip (r
     assert.equal(second.status, 429, 'spoofed header must not mint a fresh quota identity');
   } finally {
     delete process.env.OPENROUTER_API_KEY;
+    delete process.env.OPENCONVO_HOSTED_FREE;
     delete process.env.OPENCONVO_HOSTED_FREE_DAILY_LIMIT;
   }
 });
@@ -255,6 +259,7 @@ function installSearchFetch() {
 
 await test('Search route: a client Tavily key without an OpenRouter key does not spend the hosted OpenRouter key', async () => {
   process.env.OPENROUTER_API_KEY = 'sk-or-hosted-test';
+  process.env.OPENCONVO_HOSTED_FREE = 'on';
   try {
     installSearchFetch();
     const response = await searchPOST(searchRequest({ query: 'compare vector databases for small apps', mode: 'research' }, { 'x-tavily-key': 'tvly-anything' }));
@@ -263,11 +268,13 @@ await test('Search route: a client Tavily key without an OpenRouter key does not
     assert.equal(plannerCalls.length, 0, 'unmetered request must not call the hosted model planner');
   } finally {
     delete process.env.OPENROUTER_API_KEY;
+    delete process.env.OPENCONVO_HOSTED_FREE;
   }
 });
 
 await test('Search route (control): metered hosted search may use the hosted model planner', async () => {
   process.env.OPENROUTER_API_KEY = 'sk-or-hosted-test';
+  process.env.OPENCONVO_HOSTED_FREE = 'on';
   process.env.TAVILY_API_KEY = 'tvly-hosted-test';
   try {
     installSearchFetch();
@@ -277,7 +284,43 @@ await test('Search route (control): metered hosted search may use the hosted mod
     assert.equal(json.planner, 'model');
   } finally {
     delete process.env.OPENROUTER_API_KEY;
+    delete process.env.OPENCONVO_HOSTED_FREE;
     delete process.env.TAVILY_API_KEY;
+  }
+});
+
+await test('Hosted mode policy: production defaults to BYOK-only; Preview or explicit opt-in enables shared capacity', () => {
+  assert.equal(isHostedFreeEnabled({ VERCEL_ENV: 'production' }), false);
+  assert.equal(isHostedFreeEnabled({}), false);
+  assert.equal(isHostedFreeEnabled({ VERCEL_ENV: 'preview' }), true);
+  assert.equal(isHostedFreeEnabled({ VERCEL_ENV: 'preview', OPENCONVO_HOSTED_FREE: 'off' }), false);
+  assert.equal(isHostedFreeEnabled({ VERCEL_ENV: 'production', OPENCONVO_HOSTED_FREE: 'on' }), true);
+});
+
+await test('BYOK-only deployment: server keys present but never lent to keyless visitors (chat, search, config)', async () => {
+  process.env.OPENROUTER_API_KEY = 'sk-or-hosted-test';
+  process.env.TAVILY_API_KEY = 'tvly-hosted-test';
+  process.env.VERCEL_ENV = 'production';
+  try {
+    installSearchFetch();
+    const chat = await chatPOST(chatRequest(baseChatBody(), { headers: { 'x-forwarded-for': '198.51.100.200' } }));
+    assert.equal(chat.status, 401);
+    assert.match((await chat.json()).error, /your own OpenRouter key/);
+    const search = await searchPOST(searchRequest({ query: 'latest Node.js LTS', mode: 'research' }, { 'x-forwarded-for': '198.51.100.201' }));
+    assert.equal(search.status, 401);
+    assert.equal(upstreamCalls.length, 0, 'no upstream request may use the server keys');
+    const config = await (await configGET()).json();
+    assert.equal(config.hostedFreeModeAvailable, false);
+    assert.equal(config.hostedSearchAvailable, false);
+    // A BYOK visitor is unaffected.
+    installFetch(() => new Response(sseBody([delta('ok', 'stop'), 'data: [DONE]\n\n']), { status: 200 }));
+    const byok = await chatPOST(chatRequest(baseChatBody(), { headers: { 'x-openrouter-key': 'sk-or-visitor' } }));
+    assert.equal((await readEvents(byok)).at(-1).type, 'complete');
+    assert.equal(upstreamCalls[0].headers.Authorization, 'Bearer sk-or-visitor');
+  } finally {
+    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.TAVILY_API_KEY;
+    delete process.env.VERCEL_ENV;
   }
 });
 

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useCallback, useState } from 'react';
-import { Paperclip, X } from 'lucide-react';
+import { Paperclip, X, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -10,8 +10,10 @@ import type { Attachment } from '@/types/chat';
 
 interface FileUploadProps {
   attachments: Attachment[];
-  onAttach: (attachment: Attachment) => void;
+  onAttach?: (attachment: Attachment) => void;
   onRemove: (id: string) => void;
+  onFilesSelected?: (files: File[]) => Promise<void>;
+  isParsing?: boolean;
 }
 
 function formatFileSize(bytes: number): string {
@@ -20,7 +22,7 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function FileUpload({ attachments, onAttach, onRemove }: FileUploadProps) {
+export function FileUpload({ attachments, onAttach, onRemove, onFilesSelected, isParsing }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,13 +33,34 @@ export function FileUpload({ attachments, onAttach, onRemove }: FileUploadProps)
   const handleChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
-      if (!files) return;
+      if (!files || files.length === 0) return;
 
+      const fileList = Array.from(files);
       setError(null);
-      for (const file of Array.from(files)) {
+
+      if (onFilesSelected) {
+        await onFilesSelected(fileList);
+        if (inputRef.current) {
+          inputRef.current.value = '';
+        }
+        return;
+      }
+
+      for (const file of fileList) {
+        if (file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file.name)) {
+          setError('Images are not supported for text extraction; please upload PDF, TXT, MD, CSV, or code files.');
+          continue;
+        }
+
+        const isDuplicate = attachments.some((a) => a.name === file.name && a.size === file.size);
+        if (isDuplicate) {
+          setError(`"${file.name}" is already attached.`);
+          continue;
+        }
+
         try {
           const attachment = await parseFile(file);
-          onAttach(attachment);
+          onAttach?.(attachment);
         } catch (err) {
           console.error('Failed to parse file:', err);
           setError(err instanceof Error ? err.message : `Failed to read ${file.name}`);
@@ -49,7 +72,7 @@ export function FileUpload({ attachments, onAttach, onRemove }: FileUploadProps)
         inputRef.current.value = '';
       }
     },
-    [onAttach]
+    [attachments, onAttach, onFilesSelected]
   );
 
   return (
@@ -68,8 +91,13 @@ export function FileUpload({ attachments, onAttach, onRemove }: FileUploadProps)
                 {attachment.name}
               </span>
               <span className="text-[var(--color-text-tertiary)]">
-                ({formatFileSize(attachment.size)})
+                ({formatFileSize(attachment.size)}{attachment.pageCount ? ` • ${attachment.pageCount}p` : ''})
               </span>
+              {attachment.warning && (
+                <span title={attachment.warning} className="inline-flex items-center">
+                  <AlertTriangle className="h-3 w-3 text-[var(--color-warning)]" />
+                </span>
+              )}
               <button
                 onClick={() => onRemove(attachment.id)}
                 className="ml-0.5 rounded p-0.5 text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)] hover:bg-[var(--color-bg-hover)] transition-colors"

@@ -26,7 +26,15 @@ export default function PrivacyPage() {
             <Database className="h-5 w-5" />
             <h2 className="mt-4 text-lg font-semibold">What is stored locally</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">
-              Conversations, projects, prompt snippets, memory, settings, artifacts, and imported data are stored in the browser profile for the current domain.
+              Conversations, projects, prompt snippets, memory, settings, artifacts, uploaded documents, indexed text chunks, and imported data are stored in the browser profile for the current domain.
+            </p>
+          </section>
+
+          <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-5">
+            <ShieldCheck className="h-5 w-5" />
+            <h2 className="mt-4 text-lg font-semibold">Document Intelligence & Retrieval</h2>
+            <p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">
+              Uploaded files (PDF, text, code, CSV) are parsed and indexed 100% locally in your browser. Document text is never transmitted to external vector databases, embeddings services, or web search engines. When you query your documents, only the most relevant retrieved excerpts are passed to the chosen model to generate grounded answers. Deleting a conversation or document permanently removes all corresponding indexed chunks.
             </p>
           </section>
 

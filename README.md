@@ -30,12 +30,12 @@ The public site has two surfaces:
 
 OpenConvo does not require user accounts. By default, chat data is stored locally in your browser.
 
-API keys can be supplied in either place:
-
-- In `.env.local` on the server for a personal/local deployment.
-- In Settings inside the app for local browser use.
-
-Exported backups intentionally exclude API keys.
+- **Local Storage & Indexing:** Conversations, settings, uploaded files, and document search indices remain in client-side IndexedDB.
+- **Document Intelligence:** File parsing, chunking, and lexical search (BM25) run entirely inside the client browser. No external vector databases or embedding APIs are used. Raw documents are never sent to external search providers; only retrieved excerpts relevant to user questions are included in model prompts.
+- **API Keys:** API keys can be supplied in either place:
+  - In `.env.local` on the server for a personal/local deployment.
+  - In Settings inside the app for local browser use.
+  Exported backups intentionally exclude API keys.
 
 ## Free Model Safety
 
@@ -44,6 +44,8 @@ OpenConvo is intentionally conservative:
 - The model API only returns OpenRouter models whose ids end in `:free`.
 - Dynamic model pricing must report zero prompt and completion price.
 - Chat/title requests send OpenRouter provider routing options with max prompt, completion, request, and image price set to `0`.
+- Outbound web research enforces strict SSRF protections: private networks, loopback addresses, cloud metadata endpoints, and non-standard schemes are blocked across all hops and redirects.
+- In-memory hosted quotas include in-flight concurrency tracking to prevent race conditions.
 - Old saved/imported/stale model ids are repaired to a known free model.
 
 Free OpenRouter providers can still be rate limited upstream. In that case OpenConvo will try another free fallback model, then show an error if none are available.

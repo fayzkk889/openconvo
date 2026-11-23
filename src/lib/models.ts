@@ -1,74 +1,52 @@
 import { AIModel } from '@/types/models';
 
+// Offline fallback catalog, used only when the live OpenRouter catalog cannot be
+// loaded. Every id was listed as a zero-priced `:free` model in OpenRouter's
+// public /api/v1/models catalog on 2026-11-23. Free variants are retired
+// regularly; the chat route therefore also filters candidates against the live
+// catalog (see getLiveFreeModelIds) instead of trusting this list.
 export const CURATED_FREE_MODELS: AIModel[] = [
   {
-    id: 'meta-llama/llama-4-maverick:free',
-    name: 'Llama 4 Maverick',
-    provider: 'Meta',
-    contextLength: 131072,
-    description: 'Powerful open-source model with strong reasoning',
-    isFree: true,
-  },
-  {
-    id: 'deepseek/deepseek-chat-v3-0324:free',
-    name: 'DeepSeek V3',
-    provider: 'DeepSeek',
-    contextLength: 131072,
-    description: 'Strong all-around model, excels at code',
-    isFree: true,
-  },
-  {
-    id: 'microsoft/mai-ds-r1:free',
-    name: 'MAI DS R1',
-    provider: 'Microsoft',
-    contextLength: 131072,
-    description: 'Microsoft reasoning model',
-    isFree: true,
-  },
-  {
-    id: 'qwen/qwen3-235b-a22b:free',
-    name: 'Qwen 3 235B',
-    provider: 'Qwen',
-    contextLength: 40960,
-    description: 'Large parameter model with broad capabilities',
-    isFree: true,
-  },
-  {
-    id: 'google/gemma-3-27b-it:free',
-    name: 'Gemma 3 27B',
+    id: 'google/gemma-4-31b-it:free',
+    name: 'Gemma 4 31B',
     provider: 'Google',
-    contextLength: 96000,
-    description: 'Compact and efficient for quick tasks',
+    contextLength: 262144,
+    description: 'Dense general-purpose model, good default for chat',
     isFree: true,
   },
   {
-    id: 'mistralai/devstral-small:free',
-    name: 'Devstral Small',
-    provider: 'Mistral',
-    contextLength: 131072,
-    description: 'Coding-focused model from Mistral',
+    id: 'google/gemma-4-26b-a4b-it:free',
+    name: 'Gemma 4 26B A4B',
+    provider: 'Google',
+    contextLength: 262144,
+    description: 'Fast mixture-of-experts model for quick tasks',
     isFree: true,
   },
   {
-    id: 'nvidia/llama-3.1-nemotron-ultra-253b-v1:free',
-    name: 'Nemotron Ultra 253B',
+    id: 'nvidia/nemotron-3.5-super-vl:free',
+    name: 'Nemotron 3.5 Super VL',
     provider: 'NVIDIA',
-    contextLength: 131072,
-    description: 'NVIDIA\'s large reasoning model',
+    contextLength: 1000000,
+    description: 'Large-context multimodal model',
+    isFree: true,
+  },
+  {
+    id: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+    name: 'Nemotron 3 Ultra',
+    provider: 'NVIDIA',
+    contextLength: 1000000,
+    description: 'Large reasoning model; slower but thorough',
     isFree: true,
   },
 ];
 
-export const DEFAULT_MODEL_ID = 'mistralai/devstral-small:free';
+export const DEFAULT_MODEL_ID = 'google/gemma-4-31b-it:free';
 
 export const FALLBACK_CHAIN = [
   DEFAULT_MODEL_ID,
-  'google/gemma-3-27b-it:free',
-  'deepseek/deepseek-chat-v3-0324:free',
-  'qwen/qwen3-235b-a22b:free',
-  'meta-llama/llama-4-maverick:free',
-  'nvidia/llama-3.1-nemotron-ultra-253b-v1:free',
-  'meta-llama/llama-3.3-70b-instruct:free',
+  'google/gemma-4-26b-a4b-it:free',
+  'nvidia/nemotron-3.5-super-vl:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
 ];
 
 export function isSelectableFreeModel(model?: AIModel): model is AIModel {
@@ -87,6 +65,20 @@ export function resolveSafeModelId(requested: string | undefined | null, availab
   if (isSelectableFreeModel(defaultModel)) return defaultModel.id;
 
   return available.find(isSelectableFreeModel)?.id || DEFAULT_MODEL_ID;
+}
+
+/**
+ * Order the model candidates for one chat request. When the live catalog is
+ * known, ids it no longer lists are dropped (each retired id would otherwise
+ * burn one of the bounded attempts on a 404) and live models are appended so a
+ * stale configuration still has somewhere to fall back to.
+ */
+export function selectCandidateModels(candidates: string[], liveFreeIds: string[] | null): string[] {
+  const unique = Array.from(new Set(candidates.filter(isFreeModelId)));
+  if (!liveFreeIds?.length) return unique;
+  const live = new Set(liveFreeIds.filter(isFreeModelId));
+  const listed = unique.filter((id) => live.has(id));
+  return Array.from(new Set([...listed, ...live]));
 }
 
 export function getModelById(id: string): AIModel | undefined {

@@ -86,9 +86,32 @@ export function taskInstruction(taskType?: TaskType): string {
   }
 }
 
+export function hasExplicitNegativeSearchConstraint(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  return (
+    /\b(?:do\s+not|don'?t|never|no|stop|without|skip)\s+(?:use\s+)?(?:web\s+)?(?:search|research|browsing|browse|internet|googling)\b/i.test(lower) ||
+    /\b(?:do\s+not|don'?t)\s+(?:search|browse|look\s+up\s+online)\b/i.test(lower) ||
+    /\b(?:no\s+web\s+search|no\s+search|without\s+search(?:ing)?|without\s+browsing)\b/i.test(lower) ||
+    /\b(?:asking\s+for\s+a\s+plan,\s+not\s+(?:actual\s+)?(?:external\s+)?research)\b/i.test(lower) ||
+    /\b(?:(?:answer\s+)?(?:using|based\s+on|rely(?:ing)?\s+on|from|in)\s+(?:only\s+)?(?:our|this)\s+(?:conversation|chat|discussion))\b/i.test(lower) ||
+    /\b(?:(?:answer\s+)?(?:using|based\s+on|rely(?:ing)?\s+on|from|in)\s+(?:only\s+)?(?:earlier|previous|prior|above)\s+messages?)\b/i.test(lower) ||
+    /\b(?:(?:answer\s+)?(?:using|based\s+on|rely(?:ing)?\s+on|from)\s+(?:only\s+)?(?:the\s+)?(?:information|context|details|facts?|text)\s+(?:above|provided\s+above|already\s+provided|already\s+shared|already\s+known|in\s+(?:my|our)\s+messages?|in\s+(?:this|our)\s+(?:chat|conversation)))\b/i.test(lower) ||
+    /\b(?:facts?\s+(?:you\s+)?already\s+know\s+from\s+this\s+chat)\b/i.test(lower) ||
+    /\b(?:from\s+what\s+(?:we\s+discussed|i\s+told\s+you|i\s+mentioned|you\s+already\s+know))\b/i.test(lower) ||
+    /\b(?:without\s+(?:external\s+)?verification|without\s+looking\s+up\s+anything|without\s+external\s+(?:sources?|research))\b/i.test(lower) ||
+    /\b(?:previously\s+supplied\s+(?:fictional\s+)?(?:project\s+)?facts?)\b/i.test(lower) ||
+    /\b(?:using\s+(?:only\s+)?(?:the\s+)?(?:information|context|details|text)\s+(?:in|provided\s+in)\s+my\s+message)\b/i.test(lower) ||
+    /\b(?:based\s+(?:only\s+)?on\s+(?:the\s+)?(?:information|context|details|text)\s+(?:in|provided\s+in)\s+my\s+message)\b/i.test(lower) ||
+    /\b(?:rely\s+(?:only\s+)?on\s+(?:the\s+)?(?:information|context|details|text)\s+(?:in|provided\s+in)\s+my\s+message)\b/i.test(lower) ||
+    /\b(?:purely\s+fictional|entirely\s+fictional|this\s+is\s+fictional|my\s+fictional)\b/i.test(lower)
+  );
+}
+
 export function inferTaskType({
   content,
   attachments,
+  searchEnabled,
+  researchEnabled,
 }: {
   content: string;
   attachments?: Attachment[];
@@ -98,20 +121,68 @@ export function inferTaskType({
   const rawText = stripLeadingGreeting(content);
   const text = rawText.toLowerCase();
 
+  // Attachments are always local file tasks unless explicit research is active
   if (attachments?.length) return 'file';
-  if (isCasualGreeting(text)) return 'quick';
+  if (isCasualGreeting(content.trim()) || isCasualGreeting(text)) return 'quick';
+
+  // Explicit negative constraint or pure local/fictional context: never infer research
+  if (hasExplicitNegativeSearchConstraint(rawText) || isObviouslyLocalOrPersonal(rawText)) {
+    if (/\b(code|function|variable|snippet|bug|debug|typescript|javascript|python|react|component|method|class|scope)\b/.test(text)) {
+      return 'code';
+    }
+    if (/\b(write|draft|plan|improve|polish|rewrite|edit)\b/.test(text)) {
+      return 'writing';
+    }
+    return 'quick';
+  }
+
+  // Explicit deep research keywords
   if (/\b(deep research|deep dive|comprehensive research|full research|thorough research|market map|research report|literature review|competitive analysis)\b/.test(text)) {
     return 'deep-research';
   }
+
+  // Explicit toggles
+  if (researchEnabled) return 'research';
+  if (searchEnabled) return 'research';
+
+  // Check local/personal patterns first to avoid false search triggers
+  if (isObviouslyLocalOrPersonal(text)) {
+    if (/\b(code|function|variable|snippet|bug|debug|typescript|javascript|python|react|component|method|class|scope)\b/.test(text)) {
+      return 'code';
+    }
+    if (/\b(write|draft|plan|improve|polish|rewrite|edit)\b/.test(text)) {
+      return 'writing';
+    }
+    return 'quick';
+  }
+
+  // Next check genuine web research needs
   if (needsWebResearch(rawText)) {
     return 'research';
   }
+
+  // Ordinary arithmetic or math expressions must not be classified as code
+  const isArithmetic = /^(?:calculate|compute|solve|what\s+is|\d+)\s*[\d\s+\-*/^().%=]+(?:\s*[?.])?$/i.test(text.trim());
+  if (isArithmetic) {
+    return 'quick';
+  }
+
+  // Conceptual explanations without code implementation intent route to quick
+  const isConceptualExplanation = /^(?:explain|describe|what\s+is|what\s+are|how\s+does|how\s+do|overview\s+of)\b/i.test(text.trim()) &&
+    !/\b(?:write|code|implement|fix|debug|refactor|script|function|component|query|syntax|schema|migration|error|stack\s+trace)\b/i.test(text);
+
+  if (isConceptualExplanation) {
+    return 'quick';
+  }
+
   if (/\b(code|bug|debug|typescript|javascript|react|next\.?js|api|function|component|error|stack trace|compile|build|database|sql|python)\b/.test(text)) {
     return 'code';
   }
+
   if (/\b(write|rewrite|draft|edit|improve|polish|tone|copy|email|resume|bio|post|caption|grammar)\b/.test(text)) {
     return 'writing';
   }
+
   if (text.length < 180 && /\b(what|who|when|where|why|how|define|explain|summarize)\b/.test(text)) {
     return 'quick';
   }
@@ -119,46 +190,183 @@ export function inferTaskType({
   return 'quick';
 }
 
-function needsWebResearch(text: string): boolean {
+export interface WorkflowDecision {
+  taskType: TaskType;
+  searchMode: 'none' | 'search' | 'research' | 'deep-research';
+  shouldSearch: boolean;
+  isQuickTask: boolean;
+  autoRouted: boolean;
+}
+
+export function resolveWorkflow({
+  content,
+  attachments,
+  taskType = 'auto',
+  searchEnabled = false,
+  researchEnabled = false,
+}: {
+  content: string;
+  attachments?: Attachment[];
+  taskType?: TaskType;
+  searchEnabled?: boolean;
+  researchEnabled?: boolean;
+}): WorkflowDecision {
+  const isGreeting = isCasualGreeting(content.trim());
+  const hasNegativeSearch = hasExplicitNegativeSearchConstraint(content);
+
+  // Explicit negative constraint: if the prompt explicitly forbids web search, honor user intent over auto or toggle
+  if (hasNegativeSearch) {
+    const finalTaskType = (taskType === 'research' || taskType === 'deep-research')
+      ? 'quick'
+      : (taskType && taskType !== 'auto'
+          ? taskType
+          : inferTaskType({ content, attachments, searchEnabled: false, researchEnabled: false }));
+    return {
+      taskType: finalTaskType,
+      searchMode: 'none',
+      shouldSearch: false,
+      isQuickTask: finalTaskType === 'quick',
+      autoRouted: !taskType || taskType === 'auto',
+    };
+  }
+
+  const effectiveTaskType = (!taskType || taskType === 'auto')
+    ? inferTaskType({ content, attachments, searchEnabled, researchEnabled })
+    : taskType;
+
+  // 1. Casual greetings: ordinary greetings must not trigger unnecessary network requests.
+  if (isGreeting && (!taskType || taskType === 'auto' || taskType === 'quick')) {
+    return {
+      taskType: 'quick',
+      searchMode: 'none',
+      shouldSearch: false,
+      isQuickTask: true,
+      autoRouted: !taskType || taskType === 'auto',
+    };
+  }
+
+  // 2. Explicit Quick mode performs no external research
+  if (effectiveTaskType === 'quick') {
+    return {
+      taskType: 'quick',
+      searchMode: 'none',
+      shouldSearch: false,
+      isQuickTask: true,
+      autoRouted: !taskType || taskType === 'auto',
+    };
+  }
+
+  // 3. Deep research mode performs deeper research
+  if (effectiveTaskType === 'deep-research') {
+    return {
+      taskType: 'deep-research',
+      searchMode: 'deep-research',
+      shouldSearch: true,
+      isQuickTask: false,
+      autoRouted: !taskType || taskType === 'auto',
+    };
+  }
+
+  // 4. Research mode performs research
+  if (effectiveTaskType === 'research') {
+    const mode = (researchEnabled || !searchEnabled) ? 'research' : 'search';
+    return {
+      taskType: 'research',
+      searchMode: mode,
+      shouldSearch: true,
+      isQuickTask: false,
+      autoRouted: !taskType || taskType === 'auto',
+    };
+  }
+
+  // 5. File, writing, code: retain task-specific behavior, perform search only if explicit search/research is requested
+  const explicitSearch = Boolean(researchEnabled || searchEnabled);
+  return {
+    taskType: effectiveTaskType,
+    searchMode: explicitSearch ? (researchEnabled ? 'research' : 'search') : 'none',
+    shouldSearch: explicitSearch,
+    isQuickTask: false,
+    autoRouted: !taskType || taskType === 'auto',
+  };
+}
+
+export function needsWebResearch(text: string): boolean {
   const lower = text.toLowerCase();
 
-  if (isObviouslyLocalOrPersonal(lower)) {
+  if (hasExplicitNegativeSearchConstraint(lower) || isObviouslyLocalOrPersonal(lower)) {
     return false;
   }
 
-  if (/\b(source|sources|cite|citation|research|verify|fact check|fact-check|is this true|confirm)\b/.test(lower)) {
+  // Explicit verification or citation requests. "Research" used as a noun
+  // modifier ("a research plan", "my research question") describes the
+  // deliverable, not a request to search the web.
+  const withoutResearchArtifacts = lower.replace(
+    /\bresearch\s+(?:plans?|proposals?|designs?|questions?|methodology|methods|papers?|outlines?|agendas?|protocols?|hypothes[ie]s|topics?|ideas?|goals?|objectives?)\b/g,
+    ' '
+  );
+  if (/\b(source|sources|cite|citation|research|verify|fact check|fact-check|is this true|confirm)\b/.test(withoutResearchArtifacts)) {
     return true;
   }
 
-  if (/\b(latest|current|currently|today|yesterday|tomorrow|this week|this month|this year|recent|newest|news|breaking|now|live|as of|trending|trends|viral|hot topics?|hashtags?)\b/.test(lower)) {
+  // Time-sensitive external events (avoiding bare 'now' / 'plan')
+  if (/\b(latest|currently|today|yesterday|tomorrow|this week|this month|this year|recent|newest|breaking news|live score|live updates|as of 202[4-9]|trending|trends|viral|hot topics?|hashtags?|twitter|x\.com|reddit|instagram|youtube|tiktok|social media)\b/.test(lower)) {
+    return true;
+  }
+  if (/\b(?:happening\s+now|right\s+now\s+in|news\s+now|news\s+today|news\s+this\s+week)\b/.test(lower)) {
     return true;
   }
 
-  if (/\b(weather|score|fixture|schedule|standings|stock|share price|crypto|exchange rate|inflation|interest rate|election|law|legal|regulation|policy|visa|deadline|twitter|x\.com|reddit|instagram|youtube|tiktok|social media)\b/.test(lower)) {
+  // Real-world dynamic data: weather, sports, finances, regulations
+  if (/\b(weather in|score of|fixture|match schedule|standings|stock price|crypto price|exchange rate|inflation rate|interest rate|election|regulation|visa policy|travel advisory)\b/.test(lower)) {
     return true;
   }
 
-  if (/\b(price|cost|pricing|cheap|cheaper|pocket friendly|subscription|plan|free tier|available|availability|released|release date|launch|launched|budget|under|below|within|less than|up to|on road|ex showroom|ex-showroom)\b/.test(lower)) {
+  // Pricing & commercial availability
+  if (/\b(pricing|subscription plan|data plan|mobile plan|free tier|pro tier|on road price|ex-showroom price|budget|under|below|within)\b/.test(lower) && /\b(?:rs|inr|rupees?|₹|lakh|lakhs|crore|crores|usd|dollars?|\$|gbp|eur|price|pricing|cost|tier|buy|available|for)\b/.test(lower)) {
+    return true;
+  }
+  if (/\b(?:what is the pricing|what is the price|how much does|how much is)\b/.test(lower)) {
     return true;
   }
 
-  if (/\b(?:rs|inr|rupees?|₹|lakh|lakhs|crore|crores|usd|dollars?|\$|gbp|eur)\b/.test(lower)) {
+  // Release & launch status
+  if (/\b(?:is|has|are)\s+[A-Za-z0-9.+-]+\s+(?:released|launched|out|available)(?:\s+yet)?\b/i.test(lower) || /\b(?:release date|launch date|when will\s+[A-Za-z0-9.+-]+\s+be released)\b/i.test(lower)) {
     return true;
   }
 
-  if (/\b(?:cc|bhp|nm|kmpl|mah|hz|gb|tb|mp|inch|inches)\b/.test(lower) && /\b(list|models?|bikes?|cars?|phones?|laptops?|under|above|more than|less than|best|buy|recommend|available)\b/.test(lower)) {
+  // External documentation & API parameters
+  if (/\b(?:docs?|documentation|api\s+reference|api\s+endpoint|api\s+parameters?|parameters\s+for|sdk\s+for)\b/.test(lower) && /\b(?:openrouter|openai|anthropic|stripe|aws|azure|gcp|github|supabase|firebase|cohere|mistral)\b/.test(lower)) {
     return true;
   }
 
-  if (/\b(compare|comparison|versus|vs\.?|alternative|alternatives|better|best|which one|which is|which are|choose|recommend|recommendation|worth it|should i use|should i buy|give me the list|list of)\b/.test(lower) && looksLikeExternalDecision(text)) {
+  if (/\b(?:rs|inr|rupees?|₹|lakh|lakhs|crore|crores|usd|dollars?|\$|gbp|eur)\b/.test(lower) && /\b(?:price|cost|budget|under|below|worth)\b/.test(lower)) {
+    return true;
+  }
+
+  if (/\b(?:cc|bhp|nm|kmpl|mah|hz|gb|tb|mp|inch|inches)\b/.test(lower) && /\b(list|models?|bikes?|cars?|phones?|laptops?|best|buy|recommend|budget|under|below|within)\b/.test(lower)) {
+    return true;
+  }
+
+  // External decision comparison between real-world products/technologies
+  if (/\b(compare|comparison|versus|vs\.?|alternative|alternatives|which is better|which to choose|should i buy|give me the list|list of)\b/.test(lower) && looksLikeExternalDecision(text)) {
     return true;
   }
 
   return false;
 }
 
-function isObviouslyLocalOrPersonal(text: string): boolean {
-  return /\b(my file|attached|attachment|this document|my code|this code|above text|my note|my notes|rewrite this|summarize this)\b/.test(text);
+export function isObviouslyLocalOrPersonal(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  return (
+    /\b(my file|attached|attachment|this document|my code|this code|these code snippets|code snippet|this snippet|above text|my note|my notes|rewrite this|rewrite that|summarize this|summarize that|this function|this variable|this class|this component|this method|my project|a plan for my project|our project|this error|this stack trace|this issue)\b/i.test(lower) ||
+    /^(?:now\s+)?(?:explain|describe|clarify|summarize|refactor|debug|fix|optimize|review|rewrite|reformat|shorten|simplify)\s+(?:this|these|that|the following|above)\b/i.test(lower) ||
+    /^(?:write|create|draft|generate|make)\s+(?:a\s+)?(?:research\s+)?(?:plan|outline|schedule|draft|template|example|function|test|script)(?:\s+and\s+(?:plan|outline|schedule))?\s+for\s+(?:my|our|this|a)\b/i.test(lower) ||
+    /\b(?:current\s+value\s+of\s+this|value\s+of\s+(?:this\s+)?variable|in\s+this\s+scope)\b/i.test(lower) ||
+    /\b(?:compare\s+these\s+two\s+(?:code\s+)?snippets?)\b/i.test(lower) ||
+    /\b(?:in\s+my\s+message|provided\s+in\s+my\s+message|from\s+my\s+message|fictional\s+(?:scenario|project|context|entity|product|service|company|application)|my\s+fictional)\b/i.test(lower) ||
+    /\b(?:our\s+conversation|this\s+conversation|in\s+this\s+chat|from\s+this\s+chat|earlier\s+messages?|previous\s+messages?|prior\s+messages?|messages?\s+above|information\s+provided\s+above|facts\s+(?:you\s+)?already\s+know|previously\s+supplied)\b/i.test(lower) ||
+    /^(?:can\s+you\s+)?(?:rewrite|summarize|shorten|simplify|reformat|explain)\s+(?:this|that|it)(?:\s+(?:more\s+concisely|more\s+simply|as\s+a\s+table|better))?/i.test(lower)
+  );
 }
 
 export function isCasualGreeting(text: string): boolean {
@@ -175,7 +383,12 @@ export function stripLeadingGreeting(text: string): string {
 function looksLikeExternalDecision(text: string): boolean {
   const lower = text.toLowerCase();
 
-  if (/\b(product|tool|app|software|service|platform|library|framework|api|model|phone|laptop|camera|car|course|company|vendor|provider|hosting|database|cloud|subscription|plan)\b/.test(lower)) {
+  // If comparing local snippets or local code components, it's not external
+  if (/\b(snippets?|functions?|variables?|methods?|classes?|code|options? above)\b/.test(lower)) {
+    return false;
+  }
+
+  if (/\b(product|tool|app|software|service|platform|library|framework|api|model|phone|laptop|camera|car|course|company|vendor|provider|hosting|database|cloud)\b/.test(lower)) {
     return true;
   }
 
@@ -187,7 +400,11 @@ function looksLikeExternalDecision(text: string): boolean {
     return true;
   }
 
-  if (/\b[A-Z][A-Za-z0-9.+-]{2,}\b/.test(text)) {
+  if (/\b(postgresql|postgres|mongodb|mysql|sqlite|redis|kafka|supabase|firebase|react|vue|angular|svelte|nextjs|remix|docker|kubernetes|aws|azure|gcp)\b/i.test(lower)) {
+    return true;
+  }
+
+  if (/\b[A-Z][A-Za-z0-9.+-]{2,}\s+(?:and|or|vs|versus)\s+[A-Z][A-Za-z0-9.+-]{2,}\b/.test(text)) {
     return true;
   }
 

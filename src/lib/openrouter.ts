@@ -1,6 +1,7 @@
 import { AIModel } from '@/types/models';
 import { CURATED_FREE_MODELS, FALLBACK_CHAIN, isFreeModelId } from './models';
 import { buildConversationTitle } from './title';
+import { hostedOpenRouterKey } from './hosted-mode';
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 const OPENROUTER_REQUEST_TIMEOUT_MS = 45 * 1000;
@@ -23,16 +24,41 @@ export class OpenRouterError extends Error {
   providerMessage?: string;
 
   constructor(status: number, body: string) {
-    super(`OpenRouter error ${status}: ${body}`);
+    const details = parseOpenRouterErrorBody(body);
+    const sanitized = formatSanitizedOpenRouterMessage(status, details);
+    super(sanitized);
     this.name = 'OpenRouterError';
     this.status = status;
     this.body = body;
 
-    const details = parseOpenRouterErrorBody(body);
     this.retryAfterSeconds = details.retryAfterSeconds;
     this.providerName = details.providerName;
     this.providerMessage = details.message;
   }
+}
+
+export function formatSanitizedOpenRouterMessage(
+  status: number,
+  details: { message?: string; providerName?: string; retryAfterSeconds?: number }
+): string {
+  const retryText = details.retryAfterSeconds
+    ? ` Retry in about ${Math.ceil(details.retryAfterSeconds)} seconds.`
+    : '';
+  const providerText = details.providerName ? ` (${details.providerName})` : '';
+
+  if (status === 429) {
+    return `The free OpenRouter provider${providerText} is temporarily rate-limited.${retryText} Try again shortly or switch to another free model.`;
+  }
+  if (status === 402) {
+    return 'OpenRouter rejected the request because it was not available at zero price. OpenConvo blocked paid routing; choose a :free model and try again.';
+  }
+  if (status === 401 || status === 403) {
+    return 'OpenRouter rejected the API key. Check your OpenRouter key in Settings or your .env.local file.';
+  }
+  const rawMsg = sanitizeProviderMessage(details.message);
+  return rawMsg
+    ? `OpenRouter error ${status}: ${rawMsg}`
+    : `OpenRouter error ${status}. Please try another free model.`;
 }
 
 export function formatOpenRouterError(error: OpenRouterError, model?: string): string {
@@ -54,9 +80,33 @@ export function formatOpenRouterError(error: OpenRouterError, model?: string): s
     return 'OpenRouter rejected the API key. Check your OpenRouter key in Settings or your .env.local file.';
   }
 
-  return error.providerMessage
-    ? `OpenRouter error ${error.status}${modelText}: ${error.providerMessage}`
+  const rawMsg = sanitizeProviderMessage(error.providerMessage);
+
+  return rawMsg
+    ? `OpenRouter error ${error.status}${modelText}: ${rawMsg}`
     : `OpenRouter error ${error.status}${modelText}. Please try another free model.`;
+}
+
+const MAX_PROVIDER_MESSAGE_CHARS = 160;
+
+/**
+ * Provider error messages are shown to users, so keep only a short plain-text
+ * summary: drop embedded JSON payloads and redact anything shaped like a
+ * credential before display.
+ */
+export function sanitizeProviderMessage(message?: string): string {
+  if (!message) return '';
+  const cleaned = message
+    .replace(/[{[][\s\S]*$/, ' ')
+    .replace(/\bsk-[A-Za-z0-9_-]+/g, '[REDACTED_KEY]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(/\b(?:api[_-]?key|token|secret|authorization)\s*[:=]\s*\S+/gi, '[REDACTED]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[:\s-]+$/, '');
+  return cleaned.length > MAX_PROVIDER_MESSAGE_CHARS
+    ? `${cleaned.slice(0, MAX_PROVIDER_MESSAGE_CHARS - 1)}…`
+    : cleaned;
 }
 
 function parseOpenRouterErrorBody(body: string): {
@@ -89,8 +139,8 @@ function parseOpenRouterErrorBody(body: string): {
 
 function getApiKey(clientKey?: string | null): string {
   if (clientKey) return clientKey;
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key) throw new Error('OPENROUTER_API_KEY is not set');
+  const key = hostedOpenRouterKey();
+  if (!key) throw new Error('No OpenRouter key available for this request');
   return key;
 }
 
@@ -117,7 +167,9 @@ export async function streamChat(
   messages: ChatMessage[],
   model: string,
   systemPrompt?: string,
-  apiKey?: string | null
+  apiKey?: string | null,
+  signal?: AbortSignal,
+  timeoutMs = OPENROUTER_REQUEST_TIMEOUT_MS
 ): Promise<Response> {
   const allMessages: ChatMessage[] = [];
   if (systemPrompt) {
@@ -125,12 +177,17 @@ export async function streamChat(
   }
   allMessages.push(...messages);
 
-  const response = await fetchOpenRouterWithTimeout({
-    model,
-    messages: allMessages,
-    stream: true,
-    provider: FREE_ONLY_PROVIDER_OPTIONS,
-  }, apiKey);
+  const response = await fetchOpenRouterWithTimeout(
+    {
+      model,
+      messages: allMessages,
+      stream: true,
+      provider: FREE_ONLY_PROVIDER_OPTIONS,
+    },
+    apiKey,
+    timeoutMs,
+    signal
+  );
 
   if (!response.ok) {
     const errorBody = await response.text();
@@ -143,10 +200,24 @@ export async function streamChat(
 async function fetchOpenRouterWithTimeout(
   body: Record<string, unknown>,
   apiKey?: string | null,
-  timeoutMs = OPENROUTER_REQUEST_TIMEOUT_MS
+  timeoutMs = OPENROUTER_REQUEST_TIMEOUT_MS,
+  parentSignal?: AbortSignal
 ): Promise<Response> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(new Error('Request timed out')), timeoutMs);
+
+  const onParentAbort = () => {
+    controller.abort(parentSignal?.reason || new Error('Aborted by client'));
+  };
+
+  if (parentSignal) {
+    if (parentSignal.aborted) {
+      clearTimeout(timeout);
+      throw parentSignal.reason || new Error('Aborted by client');
+    }
+    parentSignal.addEventListener('abort', onParentAbort, { once: true });
+  }
+
   try {
     return await fetch(`${OPENROUTER_BASE}/chat/completions`, {
       method: 'POST',
@@ -155,12 +226,18 @@ async function fetchOpenRouterWithTimeout(
       body: JSON.stringify(body),
     });
   } catch (error) {
+    if (parentSignal?.aborted) {
+      throw parentSignal.reason || new Error('User stopped request');
+    }
     if (controller.signal.aborted) {
       throw new Error('OpenRouter did not start a response in time. Please retry or choose another free model.');
     }
     throw error;
   } finally {
     clearTimeout(timeout);
+    if (parentSignal) {
+      parentSignal.removeEventListener('abort', onParentAbort);
+    }
   }
 }
 
@@ -351,6 +428,34 @@ function normalizePlannerStrings(value: unknown, maxItems: number, maxChars: num
 }
 
 export async function fetchModels(apiKey?: string | null): Promise<AIModel[]> {
+  return (await fetchLiveFreeModels(apiKey)) ?? CURATED_FREE_MODELS;
+}
+
+const LIVE_CATALOG_TTL_MS = 5 * 60 * 1000;
+const LIVE_CATALOG_FAILURE_TTL_MS = 60 * 1000;
+const LIVE_CATALOG_TIMEOUT_MS = 3000;
+let liveCatalogCache: { ids: string[] | null; expiresAt: number } | null = null;
+
+/**
+ * Ids of the zero-priced models OpenRouter currently lists, cached per server
+ * instance. Returns null when the catalog cannot be loaded, in which case
+ * callers keep their configured candidates rather than guessing.
+ */
+export async function getLiveFreeModelIds(): Promise<string[] | null> {
+  const now = Date.now();
+  if (liveCatalogCache && liveCatalogCache.expiresAt > now) return liveCatalogCache.ids;
+  const models = await fetchLiveFreeModels(null, LIVE_CATALOG_TIMEOUT_MS);
+  const ids = models ? models.map((model) => model.id) : null;
+  liveCatalogCache = {
+    ids,
+    expiresAt: now + (ids ? LIVE_CATALOG_TTL_MS : LIVE_CATALOG_FAILURE_TTL_MS),
+  };
+  return ids;
+}
+
+async function fetchLiveFreeModels(apiKey?: string | null, timeoutMs = 8000): Promise<AIModel[] | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error('Models fetch timeout')), timeoutMs);
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -359,16 +464,17 @@ export async function fetchModels(apiKey?: string | null): Promise<AIModel[]> {
     };
     
     // Add auth only if available to prevent throwing errors on initial load
-    const key = apiKey || process.env.OPENROUTER_API_KEY;
+    const key = apiKey || hostedOpenRouterKey();
     if (key) {
       headers['Authorization'] = `Bearer ${key}`;
     }
 
     const response = await fetch(`${OPENROUTER_BASE}/models`, {
       headers,
+      signal: controller.signal,
     });
 
-    if (!response.ok) return CURATED_FREE_MODELS;
+    if (!response.ok) return null;
 
     const data = await response.json() as { data?: unknown };
     const rawModels = Array.isArray(data.data) ? data.data : [];
@@ -378,7 +484,12 @@ export async function fetchModels(apiKey?: string | null): Promise<AIModel[]> {
         if (typeof m.id !== 'string') return false;
         if (!m.id.endsWith(':free')) return false;
         const pricing = m.pricing as Record<string, unknown> | undefined;
-        return pricing && isZeroPrice(pricing.prompt) && isZeroPrice(pricing.completion);
+        return (
+          pricing &&
+          isZeroPrice(pricing.prompt) &&
+          isZeroPrice(pricing.completion) &&
+          (pricing.request === undefined || isZeroPrice(pricing.request))
+        );
       })
       .map((m) => ({
         id: m.id as string,
@@ -390,9 +501,11 @@ export async function fetchModels(apiKey?: string | null): Promise<AIModel[]> {
       }))
       .sort((a: AIModel, b: AIModel) => a.name.localeCompare(b.name));
 
-    return freeModels.length > 0 ? freeModels : CURATED_FREE_MODELS;
+    return freeModels.length > 0 ? freeModels : null;
   } catch {
-    return CURATED_FREE_MODELS;
+    return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

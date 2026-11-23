@@ -1,7 +1,8 @@
 import { exportAllData, importAllData } from './storage';
-import { Artifact, Attachment, Conversation, Message, Project, SearchResultRef } from '@/types/chat';
+import { Artifact, Attachment, Conversation, Message, Project, SearchResultRef, MessageStatus, TokenUsage } from '@/types/chat';
+import { DocumentRecord, DocumentChunk, DocumentExcerpt, DocumentProcessingStatus } from '@/types/document';
 import { DEFAULT_SETTINGS, ExportedSettings, Settings } from '@/types/settings';
-import { resolveSafeModelId } from '@/lib/models';
+import { isFreeModelId, resolveSafeModelId } from '@/lib/models';
 import { normalizeTaskType } from '@/lib/tasks';
 
 const MAX_IMPORT_ITEMS = 10000;
@@ -36,7 +37,15 @@ export async function importFromFile(file: File): Promise<ExportedSettings | und
   return validated.settings;
 }
 
-function validateImportData(data: unknown): { projects: Project[]; conversations: Conversation[]; messages: Message[]; artifacts: Artifact[]; settings?: ExportedSettings } {
+export function validateImportData(data: unknown): {
+  projects: Project[];
+  conversations: Conversation[];
+  messages: Message[];
+  artifacts: Artifact[];
+  settings?: ExportedSettings;
+  documents?: DocumentRecord[];
+  documentChunks?: DocumentChunk[];
+} {
   if (!data || typeof data !== 'object') {
     throw new Error('Invalid export file format');
   }
@@ -52,10 +61,18 @@ function validateImportData(data: unknown): { projects: Project[]; conversations
   const rawArtifacts = Array.isArray((candidate as { artifacts?: unknown }).artifacts)
     ? (candidate as { artifacts: unknown[] }).artifacts
     : [];
+  const rawDocuments = Array.isArray((candidate as { documents?: unknown }).documents)
+    ? (candidate as { documents: unknown[] }).documents
+    : [];
+  const rawDocumentChunks = Array.isArray((candidate as { documentChunks?: unknown }).documentChunks)
+    ? (candidate as { documentChunks: unknown[] }).documentChunks
+    : [];
 
   if (
     rawProjects.length > MAX_IMPORT_ITEMS ||
     rawArtifacts.length > MAX_IMPORT_ITEMS ||
+    rawDocuments.length > MAX_IMPORT_ITEMS ||
+    rawDocumentChunks.length > MAX_IMPORT_ITEMS * 5 ||
     candidate.conversations.length > MAX_IMPORT_ITEMS ||
     candidate.messages.length > MAX_IMPORT_ITEMS
   ) {
@@ -71,6 +88,9 @@ function validateImportData(data: unknown): { projects: Project[]; conversations
   const artifacts = rawArtifacts
     .map(validateArtifact)
     .filter((artifact) => !artifact.sourceMessageId || messageIds.has(artifact.sourceMessageId));
+  const documents = rawDocuments.map(validateDocumentRecord);
+  const documentIds = new Set(documents.map((doc) => doc.id));
+  const documentChunks = rawDocumentChunks.map(validateDocumentChunk);
 
   for (const conversation of conversations) {
     if (conversation.projectId && !projectIds.has(conversation.projectId)) {
@@ -93,16 +113,38 @@ function validateImportData(data: unknown): { projects: Project[]; conversations
     }
   }
 
+  for (const doc of documents) {
+    if (!conversationIds.has(doc.conversationId)) {
+      throw new Error('Import contains documents without matching conversations');
+    }
+    if (doc.projectId && !projectIds.has(doc.projectId)) {
+      throw new Error('Import contains documents without matching projects');
+    }
+  }
+
+  for (const chunk of documentChunks) {
+    if (!documentIds.has(chunk.documentId)) {
+      throw new Error('Import contains document chunks without matching documents');
+    }
+    if (!conversationIds.has(chunk.conversationId)) {
+      throw new Error('Import contains document chunks without matching conversations');
+    }
+  }
+
   return {
     projects,
     conversations,
     messages,
     artifacts,
     settings: validateExportedSettings((candidate as { settings?: unknown }).settings),
+    documents: documents.length > 0 ? documents : undefined,
+    documentChunks: documentChunks.length > 0 ? documentChunks : undefined,
   };
 }
 
-function toExportedSettings(settings: Settings): ExportedSettings {
+export const validateExportData = validateImportData;
+
+export function toExportedSettings(settings: Settings): ExportedSettings {
   return {
     theme: settings.theme,
     defaultModel: settings.defaultModel,
@@ -182,7 +224,7 @@ function validateProject(value: unknown): Project {
   };
 }
 
-function validateConversation(value: unknown): Conversation {
+export function validateConversation(value: unknown): Conversation {
   if (!value || typeof value !== 'object') {
     throw new Error('Invalid conversation in import file');
   }
@@ -205,12 +247,13 @@ function validateConversation(value: unknown): Conversation {
     projectId: typeof conv.projectId === 'string' ? conv.projectId : undefined,
     pinned: typeof conv.pinned === 'boolean' ? conv.pinned : undefined,
     archived: typeof conv.archived === 'boolean' ? conv.archived : undefined,
+    titleManuallySet: typeof conv.titleManuallySet === 'boolean' ? conv.titleManuallySet : undefined,
     createdAt: conv.createdAt,
     updatedAt: conv.updatedAt,
   };
 }
 
-function validateMessage(value: unknown): Message {
+export function validateMessage(value: unknown): Message {
   if (!value || typeof value !== 'object') {
     throw new Error('Invalid message in import file');
   }
@@ -231,10 +274,14 @@ function validateMessage(value: unknown): Message {
     conversationId: message.conversationId,
     role: message.role as Message['role'],
     content: message.content.slice(0, MAX_MESSAGE_CHARS),
-    model: typeof message.model === 'string' ? resolveSafeModelId(message.model) : undefined,
+    // Message.model records which model produced the answer. It never selects a
+    // model for new requests, so keep the historical id (free ids only) instead of
+    // relabeling answers from retired models as the current default.
+    model: typeof message.model === 'string' && isFreeModelId(message.model) ? message.model.trim().slice(0, 200) : undefined,
     attachments: normalizeImportedAttachments(message.attachments),
     searchResults: normalizeImportedSearchResults(message.searchResults),
     researchTrace: normalizeImportedResearchTrace(message.researchTrace),
+    documentExcerpts: normalizeImportedDocumentExcerpts(message.documentExcerpts),
     researchMode: typeof message.researchMode === 'boolean' ? message.researchMode : undefined,
     agentMode: typeof message.agentMode === 'boolean' ? message.agentMode : undefined,
     taskType: normalizeTaskType(message.taskType),
@@ -243,8 +290,35 @@ function validateMessage(value: unknown): Message {
     compareRun: typeof message.compareRun === 'boolean' ? message.compareRun : undefined,
     preferred: typeof message.preferred === 'boolean' ? message.preferred : undefined,
     isError: typeof message.isError === 'boolean' ? message.isError : undefined,
+    status: isValidMessageStatus(message.status) ? message.status : undefined,
+    finishReason: typeof message.finishReason === 'string' ? message.finishReason.slice(0, 100) : undefined,
+    tokenUsage: normalizeTokenUsage(message.tokenUsage),
     timestamp: message.timestamp,
   };
+}
+
+function isValidMessageStatus(value: unknown): value is MessageStatus {
+  return value === 'complete' || value === 'interrupted' || value === 'failed' || value === 'degraded';
+}
+
+function normalizeTokenUsage(value: unknown): TokenUsage | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const usage = value as Record<string, unknown>;
+  const promptTokens = typeof usage.promptTokens === 'number' && Number.isFinite(usage.promptTokens)
+    ? Math.max(0, Math.floor(usage.promptTokens))
+    : undefined;
+  const completionTokens = typeof usage.completionTokens === 'number' && Number.isFinite(usage.completionTokens)
+    ? Math.max(0, Math.floor(usage.completionTokens))
+    : undefined;
+  const totalTokens = typeof usage.totalTokens === 'number' && Number.isFinite(usage.totalTokens)
+    ? Math.max(0, Math.floor(usage.totalTokens))
+    : undefined;
+
+  if (promptTokens === undefined && completionTokens === undefined && totalTokens === undefined) {
+    return undefined;
+  }
+
+  return { promptTokens, completionTokens, totalTokens };
 }
 
 function normalizeImportedAttachments(value: unknown): Attachment[] | undefined {
@@ -288,6 +362,10 @@ function normalizeImportedSearchResults(value: unknown): SearchResultRef[] | und
       return [];
     }
     return [{
+      id: typeof result.id === 'string' ? result.id.slice(0, 50) : undefined,
+      canonicalUrl: typeof result.canonicalUrl === 'string' ? result.canonicalUrl.slice(0, 1000) : undefined,
+      domain: typeof result.domain === 'string' ? result.domain.slice(0, 100) : undefined,
+      publishedAt: typeof result.publishedAt === 'string' ? result.publishedAt.slice(0, 50) : undefined,
       title: result.title.slice(0, 200),
       url: result.url.slice(0, 1000),
       snippet: result.snippet.slice(0, 1000),
@@ -317,6 +395,8 @@ function normalizeImportedResearchTrace(value: unknown): Message['researchTrace'
   return {
     query: trace.query.slice(0, 500),
     plannedQueries: normalizeStringList(trace.plannedQueries, 8, 500),
+    plannedEntities: normalizeStringList(trace.plannedEntities, 8, 100),
+    planner: trace.planner === 'model' || trace.planner === 'heuristic' ? trace.planner : undefined,
     provider: typeof trace.provider === 'string' ? trace.provider.slice(0, 80) : undefined,
     providers: normalizeStringList(trace.providers, 8, 80),
     providerErrors: normalizeStringList(trace.providerErrors, 10, 300),
@@ -365,4 +445,117 @@ function validateArtifact(value: unknown): Artifact {
     createdAt: artifact.createdAt,
     updatedAt: artifact.updatedAt,
   };
+}
+
+function validateDocumentRecord(value: unknown): DocumentRecord {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Invalid document in import file');
+  }
+  const doc = value as Partial<DocumentRecord>;
+  if (
+    typeof doc.id !== 'string' ||
+    typeof doc.conversationId !== 'string' ||
+    typeof doc.filename !== 'string' ||
+    typeof doc.mediaType !== 'string' ||
+    typeof doc.fileSize !== 'number' ||
+    typeof doc.fingerprint !== 'string' ||
+    typeof doc.chunkCount !== 'number' ||
+    typeof doc.totalTokens !== 'number' ||
+    typeof doc.createdAt !== 'number' ||
+    typeof doc.updatedAt !== 'number'
+  ) {
+    throw new Error('Invalid document in import file');
+  }
+  return {
+    id: doc.id,
+    conversationId: doc.conversationId,
+    projectId: typeof doc.projectId === 'string' ? doc.projectId : undefined,
+    filename: doc.filename.slice(0, 255),
+    mediaType: doc.mediaType.slice(0, 100),
+    fileSize: Math.max(0, Math.floor(doc.fileSize)),
+    fingerprint: doc.fingerprint.slice(0, 128),
+    status: isValidDocumentStatus(doc.status) ? doc.status : 'ready',
+    warning: typeof doc.warning === 'string' ? doc.warning.slice(0, 500) : undefined,
+    error: typeof doc.error === 'string' ? doc.error.slice(0, 500) : undefined,
+    pageCount: typeof doc.pageCount === 'number' ? Math.max(1, Math.floor(doc.pageCount)) : undefined,
+    chunkCount: Math.max(0, Math.floor(doc.chunkCount)),
+    totalTokens: Math.max(0, Math.floor(doc.totalTokens)),
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function isValidDocumentStatus(value: unknown): value is DocumentProcessingStatus {
+  return [
+    'selected',
+    'validating',
+    'extracting',
+    'indexing',
+    'ready',
+    'partially-processed',
+    'failed',
+    'cancelled',
+  ].includes(value as string);
+}
+
+function validateDocumentChunk(value: unknown): DocumentChunk {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Invalid document chunk in import file');
+  }
+  const chunk = value as Partial<DocumentChunk>;
+  if (
+    typeof chunk.id !== 'string' ||
+    typeof chunk.documentId !== 'string' ||
+    typeof chunk.conversationId !== 'string' ||
+    typeof chunk.chunkIndex !== 'number' ||
+    typeof chunk.text !== 'string' ||
+    typeof chunk.tokenCount !== 'number'
+  ) {
+    throw new Error('Invalid document chunk in import file');
+  }
+  return {
+    id: chunk.id,
+    documentId: chunk.documentId,
+    conversationId: chunk.conversationId,
+    chunkIndex: Math.max(0, Math.floor(chunk.chunkIndex)),
+    text: chunk.text.slice(0, 20000),
+    tokenCount: Math.max(0, Math.floor(chunk.tokenCount)),
+    pageNumber: typeof chunk.pageNumber === 'number' ? Math.max(1, Math.floor(chunk.pageNumber)) : undefined,
+    startLine: typeof chunk.startLine === 'number' ? Math.max(1, Math.floor(chunk.startLine)) : undefined,
+    endLine: typeof chunk.endLine === 'number' ? Math.max(1, Math.floor(chunk.endLine)) : undefined,
+    sectionHeading: typeof chunk.sectionHeading === 'string' ? chunk.sectionHeading.slice(0, 200) : undefined,
+  };
+}
+
+function normalizeImportedDocumentExcerpts(value: unknown): DocumentExcerpt[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const excerpts = value.flatMap((item): DocumentExcerpt[] => {
+    if (!item || typeof item !== 'object') return [];
+    const exc = item as Partial<DocumentExcerpt>;
+    if (
+      typeof exc.chunkId !== 'string' ||
+      typeof exc.documentId !== 'string' ||
+      typeof exc.docIndex !== 'number' ||
+      typeof exc.filename !== 'string' ||
+      typeof exc.citationId !== 'string' ||
+      typeof exc.text !== 'string' ||
+      typeof exc.score !== 'number'
+    ) {
+      return [];
+    }
+    return [{
+      chunkId: exc.chunkId,
+      documentId: exc.documentId,
+      docIndex: Math.max(1, Math.floor(exc.docIndex)),
+      filename: exc.filename.slice(0, 255),
+      citationId: exc.citationId.slice(0, 50),
+      text: exc.text.slice(0, 10000),
+      score: exc.score,
+      pageNumber: typeof exc.pageNumber === 'number' ? Math.max(1, Math.floor(exc.pageNumber)) : undefined,
+      startLine: typeof exc.startLine === 'number' ? Math.max(1, Math.floor(exc.startLine)) : undefined,
+      endLine: typeof exc.endLine === 'number' ? Math.max(1, Math.floor(exc.endLine)) : undefined,
+      sectionHeading: typeof exc.sectionHeading === 'string' ? exc.sectionHeading.slice(0, 200) : undefined,
+    }];
+  });
+  return excerpts.length > 0 ? excerpts : undefined;
 }

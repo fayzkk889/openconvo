@@ -13,7 +13,7 @@ import { useModelReliability } from '@/hooks/use-model-reliability';
 import { downloadExport, importFromFile } from '@/lib/export';
 import { clearAllData } from '@/lib/storage';
 import { resolveSafeModelId } from '@/lib/models';
-import { TASK_PRESETS, inferTaskType } from '@/lib/tasks';
+import { TASK_PRESETS, inferTaskType, resolveWorkflow } from '@/lib/tasks';
 import { recommendModelForTask } from '@/lib/model-reliability';
 import type { WorkflowStarter, WorkflowStarterDraft } from '@/lib/workflow-starters';
 
@@ -83,11 +83,15 @@ export function AppShell() {
     togglePinned,
     toggleArchived,
     refresh,
+    updateAutoTitle,
+    storageError,
   } = useConversations();
 
   const {
     messages,
     isStreaming,
+    isBusy,
+    lifecycleState,
     researchStatus,
     error,
     sendMessage,
@@ -353,21 +357,23 @@ export function AppShell() {
             conversation={activeConversation}
             messages={messages}
             isStreaming={isStreaming}
+            isBusy={isBusy}
+            lifecycleState={lifecycleState}
             researchStatus={researchStatus}
             error={error}
             onSendMessage={(args) => {
               const titleConversationId = activeId;
               const effectiveSearchEnabled = args.searchEnabled ?? searchEnabled;
               const effectiveResearchEnabled = args.researchEnabled ?? researchEnabled;
-              const shouldAutoRoute = !args.taskType || args.taskType === 'auto';
-              const effectiveTaskType = shouldAutoRoute
-                ? inferTaskType({
-                  content: args.content,
-                  attachments: args.attachments,
-                  searchEnabled: effectiveSearchEnabled,
-                  researchEnabled: effectiveResearchEnabled,
-                })
-                : args.taskType || 'auto';
+              const workflow = resolveWorkflow({
+                content: args.content,
+                attachments: args.attachments,
+                taskType: args.taskType,
+                searchEnabled: effectiveSearchEnabled,
+                researchEnabled: effectiveResearchEnabled,
+              });
+              const shouldAutoRoute = workflow.autoRouted;
+              const effectiveTaskType = workflow.taskType;
               const hasLocalSignal = reliability.some((item) =>
                 item.taskType === effectiveTaskType &&
                 item.successes + item.failures + item.rateLimits > 0
@@ -409,7 +415,7 @@ export function AppShell() {
                 researchEnabled: effectiveResearchEnabled,
                 agentEnabled: args.agentEnabled ?? agentEnabled,
                 onTitleGenerated: (title) => {
-                  if (titleConversationId) rename(titleConversationId, title);
+                  if (titleConversationId) updateAutoTitle(titleConversationId, title);
                 }
               });
             }}

@@ -13,6 +13,7 @@ export function useConversations() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [storageError, setStorageError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showArchived, setShowArchived] = useState(false);
 
@@ -23,6 +24,7 @@ export function useConversations() {
 
   const loadConversations = useCallback(async () => {
     try {
+      setStorageError(null);
       const all = await storage.getAllConversations();
       const allProjects = await storage.getAllProjects();
       setConversations(sortConversations(all));
@@ -39,6 +41,9 @@ export function useConversations() {
       );
     } catch (error) {
       console.error('Failed to load conversations:', error);
+      setStorageError(
+        error instanceof Error ? error.message : 'Storage initialization failed. Check browser permissions or quota.'
+      );
     } finally {
       setLoading(false);
     }
@@ -117,10 +122,23 @@ export function useConversations() {
   }, []);
 
   const rename = useCallback(async (id: string, title: string) => {
-    await storage.updateConversation(id, { title });
+    await storage.updateConversation(id, { title, titleManuallySet: true });
     setConversations((prev) =>
-      sortConversations(prev.map((c) => (c.id === id ? { ...c, title, updatedAt: Date.now() } : c)))
+      sortConversations(
+        prev.map((c) => (c.id === id ? { ...c, title, titleManuallySet: true, updatedAt: Date.now() } : c))
+      )
     );
+  }, []);
+
+  const updateAutoTitle = useCallback(async (id: string, title: string) => {
+    const updated = await storage.updateAutoTitle(id, title);
+    if (!updated) return false;
+    setConversations((prev) =>
+      sortConversations(
+        prev.map((c) => (c.id === id && !c.titleManuallySet ? { ...c, title, updatedAt: Date.now() } : c))
+      )
+    );
+    return true;
   }, []);
 
   const remove = useCallback(async (id: string) => {
@@ -206,11 +224,13 @@ export function useConversations() {
     removeProject,
     select,
     rename,
+    updateAutoTitle,
     remove,
     updateConversationModel,
     togglePinned,
     toggleArchived,
     refresh,
+    storageError,
   };
 }
 

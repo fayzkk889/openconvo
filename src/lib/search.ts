@@ -1,5 +1,6 @@
 import { SearchResponse, SearchResult } from '@/types/search';
 import { rankSearchResults } from '@/lib/source-quality';
+import { hostedTavilyKey } from '@/lib/hosted-mode';
 
 const TAVILY_BASE = 'https://api.tavily.com';
 const BING_SEARCH = 'https://www.bing.com/search';
@@ -36,7 +37,8 @@ const searchCache = new Map<string, { expiresAt: number; response: SearchRespons
 export async function searchWeb(
   query: string,
   clientKey?: string | null,
-  mode: SearchMode = 'search'
+  mode: SearchMode = 'search',
+  signal?: AbortSignal
 ): Promise<SearchResponse> {
   const cacheKey = searchCacheKey(query, clientKey, mode);
   const cached = getCachedSearch(cacheKey);
@@ -49,15 +51,17 @@ export async function searchWeb(
   };
   const providerErrors: string[] = [];
   const providerResults: SearchProviderResult[] = [];
-  const hasConfiguredSearchProvider = Boolean(clientKey || process.env.TAVILY_API_KEY || process.env.SEARXNG_URL);
+  const hasConfiguredSearchProvider = Boolean(clientKey || hostedTavilyKey() || process.env.SEARXNG_URL);
 
   for (const provider of getSearchProviders()) {
+    if (signal?.aborted) break;
     if (!provider.available(context)) continue;
     try {
       const result = await withTimeout(
-        (signal) => provider.search(context, signal),
+        (provSignal) => provider.search(context, provSignal),
         SEARCH_TIMEOUT_MS,
-        `${provider.id} timed out`
+        `${provider.id} timed out`,
+        signal
       );
       if (result.results.length > 0 || result.answer) {
         providerResults.push(result);
@@ -74,6 +78,7 @@ export async function searchWeb(
         }
       }
     } catch (error) {
+      if (signal?.aborted) throw error;
       providerErrors.push(`${provider.id}: ${error instanceof Error ? error.message : 'failed'}`);
     }
   }
@@ -112,12 +117,22 @@ export async function searchWebMany(
   queries: string[],
   clientKey?: string | null,
   mode: SearchMode = 'research',
-  entities: string[] = []
+  entities: string[] = [],
+  signal?: AbortSignal
 ): Promise<SearchResponse> {
   const plannedQueries = queries.filter((query) => query.trim().length > 0);
-  const responses = await Promise.all(
-    plannedQueries.map((query) => searchWeb(query, clientKey, mode))
-  );
+  const responses: SearchResponse[] = [];
+  const CONCURRENCY_LIMIT = 3;
+
+  for (let i = 0; i < plannedQueries.length; i += CONCURRENCY_LIMIT) {
+    if (signal?.aborted) break;
+    const batch = plannedQueries.slice(i, i + CONCURRENCY_LIMIT);
+    const batchResponses = await Promise.all(
+      batch.map((query) => searchWeb(query, clientKey, mode, signal))
+    );
+    responses.push(...batchResponses);
+  }
+
   const rankingQuery = plannedQueries.join(' ');
   const rawRankedResults = rankSearchResults(
     dedupeResults(responses.flatMap((response) => response.results)),
@@ -130,7 +145,11 @@ export async function searchWebMany(
     dedupeResults([...rawRankedResults, ...seededResults]),
     rankingQuery
   );
-  const results = diversifyResearchResults(rankedResults, rankingQuery, entities)
+  const hasSubstantialSources = rankedResults.some((result) => (result.sourceScore || 0) >= 48);
+  const gatedResults = hasSubstantialSources
+    ? rankedResults.filter((result) => (result.sourceScore || 0) > 40)
+    : rankedResults;
+  const results = diversifyResearchResults(gatedResults, rankingQuery, entities)
     .slice(0, maxCombinedResultsForMode(mode));
   const providers = Array.from(new Set(responses.flatMap((response) =>
     response.provider && response.provider !== 'none' ? [response.provider] : []
@@ -161,9 +180,9 @@ function getSearchProviders(): SearchProvider[] {
 
 const tavilyProvider: SearchProvider = {
   id: 'tavily',
-  available: (context) => Boolean(context.clientTavilyKey || process.env.TAVILY_API_KEY),
+  available: (context) => Boolean(context.clientTavilyKey || hostedTavilyKey()),
   async search(context, signal) {
-    const apiKey = context.clientTavilyKey || process.env.TAVILY_API_KEY;
+    const apiKey = context.clientTavilyKey || hostedTavilyKey();
     if (!apiKey) throw new Error('Tavily key is missing');
 
     const response = await fetch(`${TAVILY_BASE}/search`, {
@@ -585,15 +604,20 @@ function normalizeHttpUrl(value: string): string | null {
   }
 }
 
-function dedupeResults(results: SearchResult[]): SearchResult[] {
+export function dedupeResults(results: SearchResult[]): SearchResult[] {
   const seen = new Set<string>();
   const seenTitleHosts = new Set<string>();
+  const seenSnippets = new Set<string>();
   return results.filter((result) => {
     const key = canonicalUrlKey(result.url);
     const titleHostKey = `${hostKey(result.url)}::${normalizeDedupeTitle(result.title)}`;
-    if (seen.has(key) || (titleHostKey.length > 3 && seenTitleHosts.has(titleHostKey))) return false;
+    const cleanSnippet = (result.snippet || '').trim().toLowerCase().slice(0, 120);
+    if (seen.has(key)) return false;
+    if (titleHostKey.length > 3 && seenTitleHosts.has(titleHostKey)) return false;
+    if (cleanSnippet.length > 40 && seenSnippets.has(cleanSnippet)) return false;
     seen.add(key);
     if (titleHostKey.length > 3) seenTitleHosts.add(titleHostKey);
+    if (cleanSnippet.length > 40) seenSnippets.add(cleanSnippet);
     return true;
   });
 }
@@ -736,28 +760,60 @@ function normalizeDedupeTitle(title: string): string {
 async function withTimeout<T>(
   run: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
-  timeoutMessage: string
+  timeoutMessage: string,
+  parentSignal?: AbortSignal
 ): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(new Error(timeoutMessage)), timeoutMs);
+
+  const onParentAbort = () => {
+    controller.abort(parentSignal?.reason || new Error('User stopped search'));
+  };
+
+  if (parentSignal) {
+    if (parentSignal.aborted) {
+      clearTimeout(timeout);
+      throw parentSignal.reason || new Error('User stopped search');
+    }
+    parentSignal.addEventListener('abort', onParentAbort, { once: true });
+  }
+
   try {
     return await run(controller.signal);
   } catch (error) {
+    if (parentSignal?.aborted) {
+      throw parentSignal.reason || new Error('User stopped search');
+    }
     if (controller.signal.aborted) {
       throw new Error(timeoutMessage);
     }
     throw error;
   } finally {
     clearTimeout(timeout);
+    if (parentSignal) {
+      parentSignal.removeEventListener('abort', onParentAbort);
+    }
   }
 }
 
-function searchCacheKey(query: string, clientKey: string | null | undefined, mode: SearchMode): string {
+export function searchCacheKey(query: string, clientKey: string | null | undefined, mode: SearchMode = 'search'): string {
+  // Step 4 Invariant: Raw API keys never become cache keys.
+  // Use a hash of clientKey to isolate BYOK users without leaking keys in memory.
+  const identity = clientKey ? `byok:${simpleHashKey(clientKey)}` : 'hosted';
   return [
     mode,
-    clientKey ? 'byok' : 'hosted',
+    identity,
     query.replace(/\s+/g, ' ').trim().toLowerCase(),
   ].join(':');
+}
+
+function simpleHashKey(key: string): string {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash << 5) - hash + key.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(16);
 }
 
 function getCachedSearch(key: string): SearchResponse | null {

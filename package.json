@@ -9,7 +9,9 @@
     "lint": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "node scripts/launch-checks.mjs",
     "check:env": "node scripts/check-env.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "test:e2e": "next build && playwright test",
+    "test:e2e:run": "playwright test"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.14",
@@ -30,6 +32,7 @@
     "postcss": "^8.5.15"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@tailwindcss/postcss": "^4.1.8",
     "@types/node": "^22.15.0",
     "@types/react": "^19.1.0",

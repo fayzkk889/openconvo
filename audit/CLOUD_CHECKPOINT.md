@@ -39,3 +39,9 @@ Review the diff, then commit on `audit/rc-3-cloud` and deploy to a Preview with 
 - Production smoke (no provider spend): `/api/config` hosted off; keyless `/api/chat` and `/api/search` → 401 with guidance; strict CSP; 12 `:free` models; PDF worker 200; `/app` loads with BYOK notice and no console errors.
 - Pre-release production was `77862a9`. Rollback: Vercel Instant Rollback to that deployment, or `git revert -m 1 c21e9fd` on `main`.
 - Open follow-ups (not blockers): shared atomic quota store before hosted-free can be public; Tavily-less BYOK search quality on Vercel (DuckDuckGo 403); Playwright e2e suite; real OS drag-drop/paste/IME coverage; a live BYOK call with a real visitor key.
+
+## Session 4 (2026-11-24): RC-4 follow-ups
+- Branch `feat/rc-4-followups`, PR https://github.com/fayzkk889/openconvo/pull/2.
+- Done: shared atomic quota store (O-01), Wikipedia keyless search (D-19), Playwright e2e suite with Chrome IME composition, native CDP file drag-drop and synthetic paste (D-20), docs/`check:env` refresh (D-21).
+- Gates: `npm test` (137 checks, RC-3 26/26, RC-4 15/15), `tsc`, `next build`, `npm run test:e2e` 9/9.
+- Still open: a live Upstash/Vercel KV store (account decision; production stays BYOK-only until one is configured); a live BYOK call with a real visitor key (needs the owner's own key, which an agent must not enter); a true OS-level drag from the file manager and real clipboard paste (automation uses the browser drag pipeline and synthetic ClipboardEvent).

@@ -85,14 +85,13 @@ OPENROUTER_API_KEY=sk-or-v1-your-key
 OPENCONVO_HOSTED_FREE_DAILY_LIMIT=20
 TAVILY_API_KEY=tvly-your-key
 SEARXNG_URL=https://your-searxng-instance.example
-OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT=5
+OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT=15
 NEXT_PUBLIC_GITHUB_URL=https://github.com/your-name/openconvo
 NEXT_PUBLIC_SITE_URL=https://openconvo.vercel.app
 ```
 
-`OPENROUTER_API_KEY` is required for chat unless supplied in Settings. `TAVILY_API_KEY` and `SEARXNG_URL` are optional; OpenConvo can use lightweight keyless search when neither is set.
-When `OPENROUTER_API_KEY` is set on a public deployment, visitors without their own key can use hosted free mode. `OPENCONVO_HOSTED_FREE_DAILY_LIMIT` controls the per-visitor daily limit for that shared mode.
-Visitors can try hosted web search even without Tavily. `OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT` controls the per-visitor daily search limit. Users who add their own Tavily key in Settings bypass the hosted search cap and use Tavily directly.
+Production deployments are bring-your-own-key by default: visitors add a free OpenRouter key (and optionally a Tavily key) in Settings, and server keys are never lent to them. Vercel Previews lend the server keys to signed-in reviewers. To lend them on production, set `OPENCONVO_HOSTED_FREE=on` **and** a shared quota store (`UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` or Vercel KV's `KV_REST_API_URL`/`KV_REST_API_TOKEN`) so per-visitor and deployment-wide daily caps hold across serverless instances. See [DEPLOYMENT.md](DEPLOYMENT.md) for all limits.
+`TAVILY_API_KEY` and `SEARXNG_URL` are optional; without them search falls back to keyless DuckDuckGo, Bing and the Wikipedia API.
 `NEXT_PUBLIC_GITHUB_URL` is optional and only controls the GitHub link on the landing page.
 `NEXT_PUBLIC_SITE_URL` controls canonical social preview URLs and should match your production domain.
 
@@ -103,7 +102,8 @@ npm run dev        # Start local development server
 npm run build      # Create a production build
 npm run start      # Start production server after build
 npm run lint       # TypeScript strict check
-npm run test       # Launch-safety checks
+npm run test       # Launch-safety checks and route/library regression tests
+npm run test:e2e   # Build, then run the Playwright browser suite (no keys needed)
 npm run check:env  # Validate deployment environment shape
 npm run typecheck  # Same as lint
 ```

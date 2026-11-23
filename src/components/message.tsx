@@ -63,6 +63,8 @@ export function Message({
       className={cn(
         'group animate-fade-in w-full py-3 md:py-4'
       )}
+      data-message-role={message.role}
+      data-message-status={isStreaming ? 'streaming' : message.status || 'complete'}
     >
       <div className={cn(
         'mx-auto flex w-full max-w-3xl gap-3 md:gap-4',

@@ -294,7 +294,12 @@ await test('Hosted mode policy: production defaults to BYOK-only; Preview or exp
   assert.equal(isHostedFreeEnabled({}), false);
   assert.equal(isHostedFreeEnabled({ VERCEL_ENV: 'preview' }), true);
   assert.equal(isHostedFreeEnabled({ VERCEL_ENV: 'preview', OPENCONVO_HOSTED_FREE: 'off' }), false);
-  assert.equal(isHostedFreeEnabled({ VERCEL_ENV: 'production', OPENCONVO_HOSTED_FREE: 'on' }), true);
+  // RC-4: production opt-in additionally requires a shared quota store.
+  assert.equal(isHostedFreeEnabled({ VERCEL_ENV: 'production', OPENCONVO_HOSTED_FREE: 'on' }), false);
+  assert.equal(isHostedFreeEnabled({
+    VERCEL_ENV: 'production', OPENCONVO_HOSTED_FREE: 'on',
+    UPSTASH_REDIS_REST_URL: 'https://example-store.upstash.io', UPSTASH_REDIS_REST_TOKEN: 'test-token',
+  }), true);
 });
 
 await test('BYOK-only deployment: server keys present but never lent to keyless visitors (chat, search, config)', async () => {

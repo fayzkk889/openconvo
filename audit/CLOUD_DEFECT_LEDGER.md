@@ -47,3 +47,13 @@
 |---|---|---|---|
 | D-17 | P1 | Production (`77862a9`) lends the server OpenRouter/Tavily keys to anyone under per-instance quotas. Public deployments now default to BYOK-only; UI explains why. | RC-3 tests: server keys never used for keyless visitors; config reports hosted off; BYOK unaffected. Browser: BYOK notice shown. |
 | D-18 | P2 | No Content-Security-Policy; markdown rendered remote images (prompt-injection exfiltration channel). CSP added. | Browser: header served, no violations on `/` and `/app`, fonts load, PDF worker parses; a cross-origin fetch is blocked. |
+
+## RC-4 (branch `feat/rc-4-followups`, PR #2)
+| ID | Was | Change | Verification |
+|---|---|---|---|
+| O-01 | Mitigated | Shared atomic quota store: `src/lib/hosted-quota.ts` counts per-visitor and deployment-wide daily caps with one `INCRBY` per check in Upstash Redis REST / Vercel KV (memory fallback). Visitor IPs are HMAC'd with the store token. An unreachable store refuses keyless requests (503), never BYOK. `OPENCONVO_HOSTED_FREE=on` on Vercel production now requires the store. | RC-4 tests: fake atomic REST server, 40 concurrent reservations vs limit 10 admit exactly 10; 25 visitors vs global 7 admit 7; store down → 503 for keyless, BYOK untouched; refund on failure (mutation-checked). **Not verified against a live Upstash/KV database**: none is provisioned. |
+| O-02 | P2 | `.env.example`/README now document hosted search default 15 (matches code), plus the new global caps. | Docs diff. |
+| O-08 | Mitigated | Unchanged, plus: in BYOK-only mode keyless search keeps the per-visitor limit and no deployment-wide cap, so BYOK users cannot exhaust each other. | RC-4 route test. |
+| D-19 | P2 | Tavily-less search on Vercel: DuckDuckGo 403. Added Wikipedia API provider (after DDG/Bing) with a term-overlap filter against its loose matches. | RC-4 parser + provider tests (DDG/Bing 403 → Wikipedia result). Live check on the Preview recorded in CLOUD_RELEASE_READINESS. |
+| D-20 | P2 | No browser e2e suite. Added Playwright (`npm run test:e2e`, 9 tests, synthetic in-browser API). | 9/9; removing the IME guard or the regenerate-complete guard makes the matching test fail. |
+| D-21 | P3 | README/DEPLOYMENT/.env.example still described pre-RC-3 public hosted mode. Rewritten. | Docs diff; `check:env` validates the new variables. |

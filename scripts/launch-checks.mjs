@@ -67,7 +67,7 @@ check('OpenRouter requests enforce zero max price', /max_price:\s*\{[\s\S]*promp
 check('OpenRouter chat startup has a request timeout', /OPENROUTER_REQUEST_TIMEOUT_MS/.test(openrouter) && /fetchOpenRouterWithTimeout/.test(openrouter));
 check('dynamic model fetch requires :free ids', /id\.endsWith\(':free'\)/.test(openrouter));
 check('chat route rejects non-free model ids', /isFreeModelId\(model\)/.test(chatRoute));
-check('hosted quota commits after provider acceptance', /commitHostedQuota\(hostedQuota\)/.test(chatRoute) && /getHostedQuotaStatus/.test(chatRoute));
+check('hosted quota reserves through the shared store and refunds failures', /reserveQuota\('chat'/.test(chatRoute) && /releaseHostedQuota\(hostedQuota\)/.test(chatRoute));
 check('hosted quota response omits internal identity', /publicHostedUsage/.test(chatRoute) && /Omit<HostedQuota, 'identity'>/.test(chatRoute));
 check('hosted search quota commits after search success', /commitHostedSearchQuota\(hostedQuota\)/.test(searchRoute) && /getHostedSearchQuotaStatus/.test(searchRoute));
 check('hosted search quota has response headers', /X-OpenConvo-Search-Limit/.test(searchRoute) && /X-OpenConvo-Search-Remaining/.test(searchRoute));
@@ -268,6 +268,16 @@ try {
 console.log('\nRunning RC-3 audit regression tests...\n');
 try {
   execFileSync(process.execPath, ['--loader', './scripts/loader.mjs', 'scripts/rc3-audit-tests.mjs'], {
+    cwd: root,
+    stdio: 'inherit',
+  });
+} catch {
+  process.exit(1);
+}
+
+console.log('\nRunning RC-4 quota store and keyless search tests...\n');
+try {
+  execFileSync(process.execPath, ['--loader', './scripts/loader.mjs', 'scripts/rc4-tests.mjs'], {
     cwd: root,
     stdio: 'inherit',
   });

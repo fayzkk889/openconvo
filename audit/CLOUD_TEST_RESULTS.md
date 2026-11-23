@@ -30,3 +30,9 @@ Failed at baseline for the expected reason, pass now: quota spoofing (D-01), hos
 
 ## Session 2 (commit `41184c2`)
 typecheck 0, `npm test` 0 (RC-3 suite 26/26, adds hosted-mode policy and BYOK-only server-key tests), build 0. Branch pushed; PR https://github.com/fayzkk889/openconvo/pull/1.
+
+## RC-4 (PR #2)
+- `npm test`: launch checks 137, RC-3 26/26, RC-4 15/15 (quota store, routes, Wikipedia).
+- `npm run test:e2e` (Playwright 1.65, installed Chrome, `next start`): 9/9. streaming + reload persistence; Stop keeps exactly the streamed partial across reload; interrupted label; regenerate keeps the old answer on HTTP error and on an interrupted stream, replaces it on complete; Enter during a real Chrome IME composition (CDP `Input.imeSetComposition`, `isComposing` asserted true) does not send; file chooser PDF parsed in-browser with only excerpts on the wire; native CDP `Input.dispatchDragEvent` drop of a real file path; file paste via synthetic ClipboardEvent; Enter during PDF parsing never sends without the file.
+- Mutation evidence: removing `!e.nativeEvent.isComposing` fails the IME test; forcing `shouldReplaceOnRegenerate` true fails the regenerate test; making the chat route skip the quota refund fails the RC-4 refund test.
+- Still not covered by automation: OS file-manager drag, the real system clipboard, a live Redis store.

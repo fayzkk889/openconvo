@@ -1,19 +1,25 @@
+import { sharedStoreConfig } from '@/lib/hosted-quota';
+
 /**
  * Whether this deployment lends its own provider keys (OPENROUTER_API_KEY,
  * TAVILY_API_KEY) to visitors who have not added their own.
  *
- * Hosted quotas are counted in per-instance memory, so they are not globally
- * enforced across serverless instances, and the shared OpenRouter key has a
- * small daily cap for every visitor combined. Public deployments therefore
- * default to bring-your-own-key. Shared capacity is lent only when:
- *   - OPENCONVO_HOSTED_FREE=on is set explicitly by the operator, or
+ * Public deployments default to bring-your-own-key. Shared capacity is lent
+ * only when:
+ *   - OPENCONVO_HOSTED_FREE=on is set explicitly by the operator. On a Vercel
+ *     production deployment this additionally requires a shared quota store
+ *     (UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN), because
+ *     per-instance memory counters cannot enforce a global daily cap across
+ *     serverless instances; or
  *   - the deployment is a Vercel Preview (access-restricted by Vercel
  *     Authentication) and OPENCONVO_HOSTED_FREE is not set to "off".
  */
 export function isHostedFreeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const setting = env.OPENCONVO_HOSTED_FREE?.trim().toLowerCase();
-  if (setting === 'on') return true;
   if (setting === 'off') return false;
+  if (setting === 'on') {
+    return env.VERCEL_ENV === 'production' ? Boolean(sharedStoreConfig(env)) : true;
+  }
   return env.VERCEL_ENV === 'preview';
 }
 

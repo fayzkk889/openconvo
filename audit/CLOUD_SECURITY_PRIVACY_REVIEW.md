@@ -17,8 +17,8 @@
 ## Remaining exposure
 | Sev | Issue |
 |---|---|
-| P1 | Hosted quotas are per-instance and reset on cold starts; the shared OpenRouter key has a hard daily cap. Abuse or ordinary popularity exhausts hosted-free for everyone. |
+| Mitigated | Hosted quotas are per-instance; public deployments are now BYOK-only, so they no longer gate public spend. |
 | P3 | DNS-rebinding window between validation and fetch (O-06). |
-| P3 | Keyless scraping fallback reachable without quota (O-08). |
-| Info | BYOK keys live in localStorage: any XSS would expose them. No XSS found, but there is no CSP header; adding one is a cheap hardening step. |
+| P3 | Keyless scraping reachable by any visitor who sends a key header, valid or not (O-08, mitigated). |
+| Info | BYOK keys live in localStorage. Mitigated by the CSP added in session 2 (`connect-src 'self'`, no remote images). `script-src` still needs `'unsafe-inline'` for Next static hydration. |
 | Info | `npm audit`: 0 advisories. This is not an application security result. |

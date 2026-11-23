@@ -27,17 +27,23 @@
 
 | ID | Sev | Issue | Why not fixed |
 |---|---|---|---|
-| O-01 | **P1 (launch)** | Hosted quotas are per-instance `Map`s: reset on cold start, not shared across instances, and the shared OpenRouter key is itself capped at 50 (or 1,000) free requests/day including failures | Needs a shared atomic store (e.g. Upstash/Vercel KV) — new infrastructure needs owner approval |
+| O-01 | Mitigated | Hosted quotas are per-instance `Map`s: reset on cold start, not shared across instances, and the shared OpenRouter key is itself capped at 50 (or 1,000) free requests/day including failures | **Resolved for launch by configuration:** public deployments are BYOK-only (`hosted-mode.ts`); shared capacity only on SSO-protected Previews or with explicit `OPENCONVO_HOSTED_FREE=on`. A shared atomic store is still needed before hosted-free can go public. |
 | O-02 | P2 | Hosted search default limit is 15 in code but 5 in `.env.example` | Product decision; set the env var explicitly in Vercel |
 | O-03 | P2 | User messages store full `chunks` in `attachments`, duplicating `documentChunks` (bloats IndexedDB and exports) | Changing stored shape needs a migration; left for a compatible cleanup |
 | O-04 | P2 | Document follow-ups that use retrieval are labeled task `quick` | Metadata only |
 | O-05 | P2 | Heuristic planner rewrites "Next.js" as "Next" in queries | Search-quality tuning; model planner usually supersedes it |
 | O-06 | P3 | SSRF check validates DNS then `fetch` resolves again (rebinding window) | Low exposure: URLs come from search providers, not users |
 | O-07 | P3 | `COMMON_TECH_NAMES` contains fixture names (`polaris labs`, `route handlers`) | Test-overfitting smell; harmless |
-| O-08 | P3 | Keyless DDG/Bing scraping reachable without quota via any `x-tavily-key` | No operator cost after D-02; abuse/IP-reputation risk only |
+| O-08 | Mitigated | Keyless DDG/Bing scraping reachable without quota via any `x-tavily-key` | BYOK-only mode returns 401 to visitors with no key of their own; a visitor-supplied key (even invalid) still reaches keyless scraping, rate-limited per instance. |
 
 ## Disproved / not defects
 - **Test F (server EOF)** and **Test E (429 redaction)** were already correct at baseline; new route-level tests now guard them.
 - **Stop not persisting** (first browser run): my mock did not error the body on abort as real `fetch` does. Corrected mock → Stop persists correctly.
 - **Model attribution mismatch** seen in a low-res screenshot: DOM shows matching name and id.
 - **Test B contamination**: planner strips "unrelated to Polaris Labs"; probe ranks route.com General (48), GitHub `caribou/polaris` Weak (23), bereavement `.edu` PDF Weak (26), Next.js docs Strong. **Test C**: all copper/finch look-alikes Weak.
+
+## Session 2 additions
+| ID | Sev | Change | Verification |
+|---|---|---|---|
+| D-17 | P1 | Production (`77862a9`) lends the server OpenRouter/Tavily keys to anyone under per-instance quotas. Public deployments now default to BYOK-only; UI explains why. | RC-3 tests: server keys never used for keyless visitors; config reports hosted off; BYOK unaffected. Browser: BYOK notice shown. |
+| D-18 | P2 | No Content-Security-Policy; markdown rendered remote images (prompt-injection exfiltration channel). CSP added. | Browser: header served, no violations on `/` and `/app`, fonts load, PDF worker parses; a cross-origin fetch is blocked. |

@@ -27,3 +27,6 @@ Failed at baseline for the expected reason, pass now: quota spoofing (D-01), hos
 - Phase 5 test 4 ("password-protected PDF") assigns the expected error message itself and is tautological.
 - `scripts/rc21-reproduction-verify.mjs` exists but is not run by `npm test`.
 - Not covered anywhere: real providers, real Tavily/DDG, real OS drag-drop/clipboard, IME, multi-tab IndexedDB contention.
+
+## Session 2 (commit `41184c2`)
+typecheck 0, `npm test` 0 (RC-3 suite 26/26, adds hosted-mode policy and BYOK-only server-key tests), build 0. Branch pushed; PR https://github.com/fayzkk889/openconvo/pull/1.

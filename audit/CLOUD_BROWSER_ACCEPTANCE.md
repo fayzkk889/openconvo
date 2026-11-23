@@ -17,3 +17,12 @@
 
 ## Not verified in a browser
 Real provider streaming/latency, Tavily/keyless search results and source panels, OS-level drag-drop and clipboard, IME composition, Test I model behaviour, keyboard-only navigation audit, Safari/Firefox, the deployed Preview.
+
+## Session 2 — local production build, commit `41184c2`
+| Check | Result | Observations |
+|---|---|---|
+| CSP header | PASS | Served on `/app`; no violations on `/` or `/app`; Inter font loads from Google Fonts. |
+| CSP enforcement | PASS | A cross-origin `fetch` from the page was refused with a `connect-src 'self'` violation (expected). |
+| PDF under CSP | PASS | Worker loaded from `/api/pdf-worker`; synthetic PDF parsed and attached. |
+| BYOK-only messaging | PASS | `/api/config` reports hosted off; composer reads "This deployment uses your own free OpenRouter key…". |
+| Vercel Preview (`openconvo-git-audit-rc-3-cloud-tanashahh.vercel.app`) | BLOCKED | Redirects to Vercel login (Preview SSO). The in-app browser has no Vercel session; credentials were not entered by the agent. |

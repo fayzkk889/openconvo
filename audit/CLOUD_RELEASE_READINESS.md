@@ -1,41 +1,44 @@
-# Release Readiness — RC-3 audit
+# Release Readiness — RC-3
 
-## Verdict: **READY FOR PREVIEW VALIDATION** (not production)
+## Launch configuration (decided)
+**BYOK-only in production.** Hosted-free stays in the code but lends server keys only on Vercel Previews (behind Vercel Authentication) or when an operator sets `OPENCONVO_HOSTED_FREE=on`. Reason: hosted quotas live in per-instance memory and OpenRouter caps a free key at 50 (or 1,000) requests/day for all visitors combined, so public hosted-free cannot be fairly enforced without new shared infrastructure.
 
-The ordinary BYOK workflow is now in good shape at the application level, with browser evidence for Stop, regeneration, persistence, documents, export/import, and deletion. Two things stop a broad launch: hosted-free mode cannot be enforced or funded at public scale, and nothing on this branch has been run against a live provider yet.
+## Live verification (Vercel Preview, real OpenRouter + Tavily, server key via Preview hosted mode)
+Preview `openconvo-git-audit-rc-3-cloud-tanashahh.vercel.app`, commit `ae2aae3` (code identical to `41184c2`).
 
-## Dimensions
+| Check | Result |
+|---|---|
+| Test A (fictional facts, no search) | PASS — correct summary; follow-up "SQLite … September 21, 2027"; 0 `/api/search` calls |
+| Real provider 429 → fallback | PASS — `google/gemma-4-31b-it:free` 429 (Google AI Studio) → fell back before content to `baidu/ernie-5.5-flash-preview:free`; attribution shows the producing model |
+| Test B (live research) | PASS — Tavily results; 3 official nextjs.org pages Strong at top; no Polaris in planned queries; answer `complete/stop`; citations [1][2][3][6] all map to retrieved sources |
+| Test H (real PDF bytes) | PASS — Lina Patel, page 3 `[D1:p3]`; states no approval date exists and distinguishes the target release date |
+| Test I (document prompt injection) | PASS — answered Ravi Iyer / 42,000 credits; explicitly disregarded "BANANA PLANET" |
+| Stop on live stream | PASS — stored partial = 2,975 streamed chars, `interrupted/cancelled`; no further data; survives refresh |
+| CSP on Preview | PASS for the app; Vercel's Preview toolbar was blocked → fixed in `f4299ec` |
 
-| # | Dimension | Rating | Basis |
-|---|---|---|---|
-| 1 | Functional correctness | PARTIAL | Core flows pass in the browser with a deterministic stream; live provider not run |
-| 2 | Conversation reliability | PASS | Persistence, refresh, ordering, delete cleanup verified |
-| 3 | Model routing | PARTIAL | Stale catalog fixed; model quality of the new free set not measured |
-| 4 | SSE lifecycle | PASS | Route + client tests (EOF, UTF-8 split, fallback-before-content, abort); browser Stop |
-| 5 | Search relevance | PARTIAL | Ranking probes OK for historical cases; no live search run |
-| 6 | Citation trustworthiness | PARTIAL | Document citations verified; web citations not exercised live |
-| 7 | Document intelligence | PASS | Real PDF bytes → page-accurate retrieval in Node and browser |
-| 8 | IndexedDB integrity | PASS | Interrupted/regenerated/imported/deleted states inspected directly |
-| 9 | File ingestion UX | PARTIAL | Paperclip path verified; OS drag-drop/paste not verified |
-| 10 | Cancellation & recovery | PASS | Stop and failed regeneration preserve content (browser) |
-| 11 | Security & privacy | PARTIAL | Quota spoofing and data minimization fixed; no CSP; quota store open |
-| 12 | Hosted-free quota reliability | **FAIL** | Per-instance memory; shared key capped at 50 (or 1,000) req/day by OpenRouter |
-| 13 | Browser compatibility | NOT VERIFIED | Chromium only |
-| 14 | Accessibility | PARTIAL | Status notices use `role="status"`; no full keyboard/screen-reader audit |
-| 15 | Observability | PARTIAL | `console.error` only; no error reporting or quota metrics |
-| 16 | Deployment & rollback safety | PASS | Branch-only change, no schema migration, Preview-first |
+What this proves: the full server path (live catalog, zero-price routing, SSE parsing of real provider output, fallback, search, retrieval) works against the real provider. BYOK differs only in where the key comes from (request header vs server env); that difference is covered by route tests that assert the visitor's key is used as the `Authorization` header. A BYOK call with a real visitor key was not made (no key available to the agent).
 
-## Blockers
-- **P1 — Hosted-free (O-01).** Launch BYOK-only, or keep hosted-free behind restricted access (Vercel protection or allowlist), until quotas move to a shared atomic store and the hosted key's daily cap is sized for expected traffic.
-- **P1 — Unverified live inference.** Run the smoke list below on a Preview before any promotion.
+## Production conditions
+| Condition | Status |
+|---|---|
+| No open P0; no open P1 for BYOK launch | Met |
+| Data compatibility | Met — IndexedDB schema unchanged (v5); retired model ids remapped on selection; message history keeps attribution |
+| Build, regression gates | Met — typecheck, `npm test` (RC-3 26/26), build, `npm audit` 0 |
+| Browser acceptance | Met locally and on Preview (see `CLOUD_BROWSER_ACCEPTANCE.md`) |
+| Enabled mode verified | Met with the caveat above |
+| Free-only routing, secrets protected | Met |
+| No new paid infrastructure | Met |
+| Hosted-free disabled for public | Met (`VERCEL_ENV=production` → off) |
+| Reversible | Met — see rollback |
+| Preview validated on the exact release commit | Met — `f4299ec` Preview: CSP header served, Vercel toolbar loads, no new violations, live coding prompt routed `code` and completed `stop` with correct TypeScript |
 
-## Pre-launch checklist
-1. Review and commit `audit/rc-3-cloud`; deploy to a Vercel Preview (not production).
-2. With a BYOK key on the Preview, run once each: Tests A–D, Test B with live search (check source panel and citations), Test C absence answer, Test H with `audit/fixtures/aurora-synthetic.pdf`, Test I with `audit/fixtures/injection-memo.txt`, Stop on a long answer, regeneration, one TypeScript coding prompt. Record model id and outcome per run, keeping provider 429s separate from app defects.
-3. Real drag-drop and clipboard paste of the PDF in Chrome, Safari, and Firefox.
-4. Set `OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT` explicitly (code default 15 ≠ docs 5).
-5. Decide hosted-free: disable `OPENROUTER_API_KEY` on public deployments, or add shared quota storage.
-6. Optional hardening: CSP header; wire `rc21-reproduction-verify.mjs` into `npm test` or delete it.
+## Known limitations at launch
+- BYOK users without a Tavily key get keyless search; DuckDuckGo returns 403 to Vercel servers, so results rely on Bing HTML and seeded sources. Add a Tavily key in Settings for reliable research.
+- Page extraction is off by default (`OPENCONVO_ENABLE_PAGE_EXTRACTION`); research cites search snippets.
+- Free models occasionally cite document IDs at a finer granularity than supplied (e.g. `[D1:L2]` for excerpt `D1:L1-L7`).
+- Real OS drag-and-drop, clipboard paste, and IME were not exercised by automation.
 
-## Recommendation
-Keep OpenConvo in Preview. After step 2 passes, it is reasonable to release **BYOK-only** to a limited audience. Do not publish hosted-free broadly on the current quota design.
+## Rollback
+- Pre-release production: commit `77862a9` (Vercel production deployment of 2026-06-21).
+- Fastest: Vercel dashboard → Deployments → previous production deployment → Instant Rollback (owner action).
+- Agent-executable: `git revert -m 1 <merge-commit>` on `main` and push; Vercel redeploys the previous code.

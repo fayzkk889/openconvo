@@ -348,6 +348,17 @@ export function detectEvidenceGaps(
   };
 }
 
+/**
+ * Whether a search query can only be understood with earlier conversation
+ * entities. Mirrors the check planResearchQueries applies server-side, so the
+ * client sends conversation entities to /api/search only when they will be used.
+ */
+export function needsConversationContext(query: string): boolean {
+  const sanitized = stripNegativeExclusions(query);
+  const normalized = normalizeSearchQuery(sanitized || query);
+  return isContextDependentQuery(normalized, analyzeResearchQuery(normalized).subjects);
+}
+
 export function isContextDependentQuery(query: string, subjects: string[]): boolean {
   const lower = query.toLowerCase().trim();
   const startsWithAnaphoric = /^(?:what\s+(?:about|is|are)|how\s+(?:about|does|is|much\s+is)|and|is|are|can|does|tell\s+me\s+about)\s+(?:it|its|they|their|them|that|these|those|both|the\s+former|the\s+latter)\b/i.test(lower);

@@ -141,7 +141,7 @@ export async function deleteConversation(id: string): Promise<void> {
 
 export async function addMessage(
   conversationId: string,
-  message: Omit<Message, 'id' | 'conversationId' | 'timestamp'>
+  message: Omit<Message, 'id' | 'conversationId' | 'timestamp'> & { timestamp?: number }
 ): Promise<Message | null> {
   const db = await getDB();
   const tx = db.transaction(['conversations', 'messages'], 'readwrite');
@@ -156,7 +156,7 @@ export async function addMessage(
     ...message,
     id: generateId(),
     conversationId,
-    timestamp: Date.now(),
+    timestamp: message.timestamp ?? Date.now(),
   };
   await tx.objectStore('messages').put(fullMessage);
   await convStore.put({ ...existingConv, updatedAt: Date.now() });

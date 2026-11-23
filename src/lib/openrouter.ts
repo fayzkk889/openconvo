@@ -54,9 +54,7 @@ export function formatSanitizedOpenRouterMessage(
   if (status === 401 || status === 403) {
     return 'OpenRouter rejected the API key. Check your OpenRouter key in Settings or your .env.local file.';
   }
-  const rawMsg = details.message
-    ? details.message.replace(/sk-[a-zA-Z0-9_-]+/g, '[REDACTED_KEY]')
-    : '';
+  const rawMsg = sanitizeProviderMessage(details.message);
   return rawMsg
     ? `OpenRouter error ${status}: ${rawMsg}`
     : `OpenRouter error ${status}. Please try another free model.`;
@@ -81,13 +79,33 @@ export function formatOpenRouterError(error: OpenRouterError, model?: string): s
     return 'OpenRouter rejected the API key. Check your OpenRouter key in Settings or your .env.local file.';
   }
 
-  const rawMsg = error.providerMessage
-    ? error.providerMessage.replace(/sk-[a-zA-Z0-9_-]+/g, '[REDACTED_KEY]')
-    : '';
+  const rawMsg = sanitizeProviderMessage(error.providerMessage);
 
   return rawMsg
     ? `OpenRouter error ${error.status}${modelText}: ${rawMsg}`
     : `OpenRouter error ${error.status}${modelText}. Please try another free model.`;
+}
+
+const MAX_PROVIDER_MESSAGE_CHARS = 160;
+
+/**
+ * Provider error messages are shown to users, so keep only a short plain-text
+ * summary: drop embedded JSON payloads and redact anything shaped like a
+ * credential before display.
+ */
+export function sanitizeProviderMessage(message?: string): string {
+  if (!message) return '';
+  const cleaned = message
+    .replace(/[{[][\s\S]*$/, ' ')
+    .replace(/\bsk-[A-Za-z0-9_-]+/g, '[REDACTED_KEY]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(/\b(?:api[_-]?key|token|secret|authorization)\s*[:=]\s*\S+/gi, '[REDACTED]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[:\s-]+$/, '');
+  return cleaned.length > MAX_PROVIDER_MESSAGE_CHARS
+    ? `${cleaned.slice(0, MAX_PROVIDER_MESSAGE_CHARS - 1)}…`
+    : cleaned;
 }
 
 function parseOpenRouterErrorBody(body: string): {
@@ -409,8 +427,34 @@ function normalizePlannerStrings(value: unknown, maxItems: number, maxChars: num
 }
 
 export async function fetchModels(apiKey?: string | null): Promise<AIModel[]> {
+  return (await fetchLiveFreeModels(apiKey)) ?? CURATED_FREE_MODELS;
+}
+
+const LIVE_CATALOG_TTL_MS = 5 * 60 * 1000;
+const LIVE_CATALOG_FAILURE_TTL_MS = 60 * 1000;
+const LIVE_CATALOG_TIMEOUT_MS = 3000;
+let liveCatalogCache: { ids: string[] | null; expiresAt: number } | null = null;
+
+/**
+ * Ids of the zero-priced models OpenRouter currently lists, cached per server
+ * instance. Returns null when the catalog cannot be loaded, in which case
+ * callers keep their configured candidates rather than guessing.
+ */
+export async function getLiveFreeModelIds(): Promise<string[] | null> {
+  const now = Date.now();
+  if (liveCatalogCache && liveCatalogCache.expiresAt > now) return liveCatalogCache.ids;
+  const models = await fetchLiveFreeModels(null, LIVE_CATALOG_TIMEOUT_MS);
+  const ids = models ? models.map((model) => model.id) : null;
+  liveCatalogCache = {
+    ids,
+    expiresAt: now + (ids ? LIVE_CATALOG_TTL_MS : LIVE_CATALOG_FAILURE_TTL_MS),
+  };
+  return ids;
+}
+
+async function fetchLiveFreeModels(apiKey?: string | null, timeoutMs = 8000): Promise<AIModel[] | null> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new Error('Models fetch timeout')), 8000);
+  const timeout = setTimeout(() => controller.abort(new Error('Models fetch timeout')), timeoutMs);
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -429,7 +473,7 @@ export async function fetchModels(apiKey?: string | null): Promise<AIModel[]> {
       signal: controller.signal,
     });
 
-    if (!response.ok) return CURATED_FREE_MODELS;
+    if (!response.ok) return null;
 
     const data = await response.json() as { data?: unknown };
     const rawModels = Array.isArray(data.data) ? data.data : [];
@@ -456,9 +500,9 @@ export async function fetchModels(apiKey?: string | null): Promise<AIModel[]> {
       }))
       .sort((a: AIModel, b: AIModel) => a.name.localeCompare(b.name));
 
-    return freeModels.length > 0 ? freeModels : CURATED_FREE_MODELS;
+    return freeModels.length > 0 ? freeModels : null;
   } catch {
-    return CURATED_FREE_MODELS;
+    return null;
   } finally {
     clearTimeout(timeout);
   }

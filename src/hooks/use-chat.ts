@@ -15,7 +15,14 @@ import { retrieveDocumentExcerpts } from '@/lib/document-retrieval';
 import { shouldRetrieveConversationDocuments } from '@/lib/document-followup';
 import { buildConversationTitle } from '@/lib/title';
 import { isCasualGreeting, stripLeadingGreeting, resolveWorkflow } from '@/lib/tasks';
-import { extractConversationContextEntities } from '@/lib/research-planner';
+import { extractConversationContextEntities, needsConversationContext } from '@/lib/research-planner';
+import {
+  buildApiMessages,
+  historyBeforeMessage,
+  shouldReplaceOnRegenerate,
+  toWireAttachments,
+  withAttachmentCue,
+} from '@/lib/chat-history';
 import { consumeChatStream } from '@/lib/sse-parser';
 
 const STREAM_FLUSH_MS = 18;
@@ -323,7 +330,12 @@ export function useChat(
           });
 
           try {
-            const contextEntities = extractConversationContextEntities(messages);
+            // Data minimization: earlier conversation entities leave the browser only
+            // when the query cannot be understood without them (e.g. "what about its pricing?").
+            const searchQuery = stripLeadingGreeting(content);
+            const contextEntities = needsConversationContext(searchQuery)
+              ? extractConversationContextEntities(messages)
+              : [];
 
             const searchRes = await fetchWithTimeout(
               '/api/search',
@@ -335,7 +347,7 @@ export function useChat(
                   ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
                 },
                 body: JSON.stringify({
-                  query: stripLeadingGreeting(content),
+                  query: searchQuery,
                   mode: searchMode,
                   model: activeModel,
                   contextEntities: contextEntities.length > 0 ? contextEntities : undefined,
@@ -453,7 +465,7 @@ export function useChat(
                   .map((item) => item.id),
                 systemPrompt: systemPrompt || undefined,
                 searchResults: searchResults?.results,
-                attachments,
+                attachments: toWireAttachments(attachments),
                 documentExcerpts,
                 researchMode: shouldUseResearch,
                 agentMode: agentEnabled === true,
@@ -602,6 +614,9 @@ export function useChat(
                     documentExcerpts,
                     status: 'interrupted',
                     finishReason: 'cancelled',
+                    // Keep the stopped answer ordered where it started, even if the
+                    // next user message is persisted before this write lands.
+                    timestamp: placeholderMessage.timestamp,
                   });
                   if (interruptedMsg && activeConversationIdRef.current === targetConversationId) {
                     setMessages((prev) =>
@@ -766,7 +781,12 @@ export function useChat(
       setMessages((prev) => [...prev.slice(0, msgIndex), placeholderMessage]);
 
       const currentMessages = await storage.getMessages(targetConversationId);
-      const apiMessages = buildApiMessages(currentMessages, userMsg.id, userMsg.content, userMsg.attachments);
+      const apiMessages = buildApiMessages(
+        historyBeforeMessage(currentMessages, targetMessage.id, msgIndex),
+        userMsg.id,
+        userMsg.content,
+        userMsg.attachments
+      );
 
       let fullContent = '';
       let finalModel = model;
@@ -793,7 +813,7 @@ export function useChat(
               .map((item) => item.id),
             systemPrompt: systemPrompt || undefined,
             searchResults: targetMessage.searchResults,
-            attachments: userMsg.attachments,
+            attachments: toWireAttachments(userMsg.attachments),
             documentExcerpts: targetMessage.documentExcerpts,
             researchMode: targetMessage.researchMode === true,
             agentMode: targetMessage.agentMode === true,
@@ -855,6 +875,14 @@ export function useChat(
 
         if (!fullContent.trim()) {
           throw new Error('The model returned an empty response. Please try again.');
+        }
+
+        if (!shouldReplaceOnRegenerate(streamResult.status)) {
+          throw new Error(
+            streamResult.status === 'degraded'
+              ? 'Regeneration could not reach a model, so your previous answer was kept.'
+              : 'Regeneration was interrupted before it finished, so your previous answer was kept.'
+          );
         }
 
         await streamDisplay?.finish(fullContent);
@@ -945,45 +973,8 @@ export function useChat(
           onModelOutcome?.({ modelId: model, taskType: targetMessage.taskType, outcome: 'failure' });
         }
 
-        const fallbackContent = buildClientResearchFallback(
-          userMsg.content,
-          targetMessage.searchResults,
-          errorMessage,
-          Boolean(targetMessage.researchMode || targetMessage.taskType === 'research' || targetMessage.taskType === 'deep-research')
-        );
-        if (fallbackContent) {
-          const targetConv = await storage.getConversation(targetConversationId);
-          if (!targetConv) {
-            run.state = 'cancelled';
-            return;
-          }
-          const storedFallback = await storage.replaceMessagesTransactional(
-            targetConversationId,
-            stagedOriginalMessages.map((m) => m.id),
-            {
-              role: 'assistant',
-              content: fallbackContent,
-              model,
-              researchMode: targetMessage.researchMode,
-              agentMode: targetMessage.agentMode,
-              taskType: targetMessage.taskType,
-              autoRouted: targetMessage.autoRouted,
-              routingNote: targetMessage.routingNote,
-              searchResults: targetMessage.searchResults,
-              researchTrace: targetMessage.researchTrace,
-              documentExcerpts: targetMessage.documentExcerpts,
-              status: 'degraded',
-              finishReason: 'fallback',
-            }
-          );
-          if (storedFallback && activeConversationIdRef.current === targetConversationId) {
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? storedFallback : m))
-            );
-          }
-          return;
-        }
-
+        // A failed regeneration never replaces the previous answer: restore it and
+        // report the failure instead of persisting a degraded fallback over it.
         // Genuine error: restore original messages in UI and show error message without deleting historical branch
         setError(errorMessage);
         if (activeConversationIdRef.current === targetConversationId) {
@@ -1045,40 +1036,6 @@ export function useChat(
     removeMessage,
     preferMessage,
   };
-}
-
-function buildApiMessages(
-  history: Message[],
-  currentPromptId?: string,
-  currentPromptContent?: string,
-  attachments?: Attachment[]
-): Array<{ role: 'user' | 'assistant'; content: string }> {
-  // Step 6: Exclude failed assistant messages (isError === true) and empty messages
-  const valid = history.filter((m) => !m.isError && m.content && m.content.trim().length > 0);
-
-  // Compare mode: deduplicate competing assistant answers to prevent feeding competing answers back to model
-  const deduped: Message[] = [];
-  for (let i = 0; i < valid.length; i++) {
-    const msg = valid[i];
-    if (msg.role === 'assistant' && msg.compareRun) {
-      const siblings = [msg];
-      while (i + 1 < valid.length && valid[i + 1].role === 'assistant' && valid[i + 1].compareRun) {
-        siblings.push(valid[i + 1]);
-        i++;
-      }
-      const preferred = siblings.find((s) => s.preferred) || siblings[siblings.length - 1];
-      deduped.push(preferred);
-    } else {
-      deduped.push(msg);
-    }
-  }
-
-  return deduped.map((m) => ({
-    role: m.role as 'user' | 'assistant',
-    content: m.id === currentPromptId && currentPromptContent
-      ? withAttachmentCue(currentPromptContent, attachments)
-      : m.content,
-  }));
 }
 
 function buildResearchTrace(searchResults: SearchResponse | null): ResearchTrace | undefined {
@@ -1145,12 +1102,6 @@ async function readChatError(response: Response, fallback: string): Promise<Chat
   } catch {
     return new ChatRequestError(text);
   }
-}
-
-function withAttachmentCue(content: string, attachments?: Attachment[]): string {
-  if (!attachments?.length) return content;
-  const names = attachments.map((attachment) => attachment.name).join(', ');
-  return `${content}\n\n[Current message attachments: ${names}]`;
 }
 
 function isCoolingDown(model: AIModel): boolean {

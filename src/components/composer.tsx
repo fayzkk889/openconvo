@@ -91,6 +91,12 @@ export function Composer({
   const [isParsingFiles, setIsParsingFiles] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const dragCounterRef = useRef(0);
+  // Parses can overlap (a second drop or paste while the first file is still
+  // parsing). Track them with a counter so Send stays disabled until all finish,
+  // and check duplicates against the latest attachments rather than a stale render.
+  const pendingParsesRef = useRef(0);
+  const attachmentsRef = useRef<Attachment[]>([]);
+  attachmentsRef.current = attachments;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const isWorking = isStreaming || Boolean(isBusy);
@@ -122,7 +128,9 @@ export function Composer({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      // Enter while an IME composition is active confirms the candidate text
+      // (CJK input); it must not send a half-composed message.
+      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault();
         handleSend();
       }
@@ -134,6 +142,7 @@ export function Composer({
     async (files: File[]) => {
       if (!files.length) return;
       setFileError(null);
+      pendingParsesRef.current += 1;
       setIsParsingFiles(true);
 
       try {
@@ -143,7 +152,7 @@ export function Composer({
             continue;
           }
 
-          const isDuplicate = attachments.some((a) => a.name === file.name && a.size === file.size);
+          const isDuplicate = attachmentsRef.current.some((a) => a.name === file.name && a.size === file.size);
           if (isDuplicate) {
             setFileError(`"${file.name}" is already attached.`);
             continue;
@@ -164,10 +173,11 @@ export function Composer({
           }
         }
       } finally {
-        setIsParsingFiles(false);
+        pendingParsesRef.current = Math.max(0, pendingParsesRef.current - 1);
+        if (pendingParsesRef.current === 0) setIsParsingFiles(false);
       }
     },
-    [attachments]
+    []
   );
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {

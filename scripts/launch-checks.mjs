@@ -264,3 +264,13 @@ try {
 } catch {
   process.exit(1);
 }
+
+console.log('\nRunning RC-3 audit regression tests...\n');
+try {
+  execFileSync(process.execPath, ['--loader', './scripts/loader.mjs', 'scripts/rc3-audit-tests.mjs'], {
+    cwd: root,
+    stdio: 'inherit',
+  });
+} catch {
+  process.exit(1);
+}

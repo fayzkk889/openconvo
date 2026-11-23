@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
-import { streamChat, generateTitle, ChatMessage, OpenRouterError, formatOpenRouterError } from '@/lib/openrouter';
-import { FALLBACK_CHAIN, isFreeModelId, getModelById } from '@/lib/models';
+import { streamChat, generateTitle, ChatMessage, OpenRouterError, formatOpenRouterError, getLiveFreeModelIds } from '@/lib/openrouter';
+import { FALLBACK_CHAIN, isFreeModelId, getModelById, selectCandidateModels } from '@/lib/models';
 import { buildSystemPrompt } from '@/lib/prompts';
 import { SearchResult } from '@/types/search';
 import { Attachment, TaskType, StreamingChatEvent, TokenUsage } from '@/types/chat';
@@ -11,6 +11,7 @@ import { ensureResearchCitations, buildSourcesAppendixIfMissing } from '@/lib/re
 import { buildDocumentAppendixIfMissing } from '@/lib/document-citations';
 import { selectBoundedContext } from '@/lib/context-usage';
 import { SseChunkParser, parseOpenRouterPayload } from '@/lib/sse-parser';
+import { getUsageIdentity } from '@/lib/request-identity';
 
 export const maxDuration = 60;
 
@@ -124,11 +125,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Try the selected model, then fallback chain (bounded to free models only)
-    const modelsToTry = uniqueFreeModels([
-      model,
-      ...availableModels,
-      ...FALLBACK_CHAIN,
-    ]);
+    const modelsToTry = selectCandidateModels(
+      [model, ...availableModels, ...FALLBACK_CHAIN],
+      await getLiveFreeModelIds()
+    );
 
     const requestId = 'req_' + Math.random().toString(36).slice(2, 10);
     const encoder = new TextEncoder();
@@ -404,6 +404,9 @@ export async function POST(request: NextRequest) {
             }
           } catch (modelError) {
             lastError = modelError as Error;
+            // A client disconnect is not a model failure: stop instead of spending
+            // further upstream requests on fallback candidates nobody will read.
+            if (request.signal.aborted) break;
             failedModels.push(tryModel);
 
             if (modelError instanceof OpenRouterError && modelError.status === 429) {
@@ -608,7 +611,7 @@ function getHostedQuotaStatus(request: NextRequest, clientKey: string | null): H
   }
 
   const limit = getHostedFreeDailyLimit();
-  const identity = getUsageIdentity(request);
+  const identity = getUsageIdentity(request.headers);
   const now = Date.now();
   const resetAt = getNextUtcMidnight(now);
   const existing = hostedUsage.get(identity);
@@ -707,13 +710,6 @@ function getHostedFreeDailyLimit(): number {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : 20;
 }
 
-function getUsageIdentity(request: NextRequest): string {
-  const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  const realIp = request.headers.get('x-real-ip')?.trim();
-  const cfIp = request.headers.get('cf-connecting-ip')?.trim();
-  return cfIp || forwardedFor || realIp || 'local';
-}
-
 function getNextUtcMidnight(now: number): number {
   const date = new Date(now);
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1);
@@ -780,10 +776,6 @@ function normalizeAvailableModels(value: unknown): string[] {
     .map((item) => item.trim())
     .filter(isFreeModelId)
     .slice(0, 40);
-}
-
-function uniqueFreeModels(models: string[]): string[] {
-  return Array.from(new Set(models.filter(isFreeModelId)));
 }
 
 function normalizeSearchResults(value: unknown): SearchResult[] | undefined {

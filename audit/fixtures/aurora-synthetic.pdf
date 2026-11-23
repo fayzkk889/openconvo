@@ -1,0 +1,76 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R 7 0 R 9 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Length 172 >>
+stream
+BT
+/F1 12 Tf
+14 TL
+72 720 Td
+(Project Ledger - Synthetic Fixture) Tj
+T* (Initial planning identifier: MINT-1047.) Tj
+T* (This page describes the early budget review.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Length 163 >>
+stream
+BT
+/F1 12 Tf
+14 TL
+72 720 Td
+(Infrastructure notes) Tj
+T* (Staging cluster identifier: OAK-2206.) Tj
+T* (Load tests are scheduled after the security review.) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 179 >>
+stream
+BT
+/F1 12 Tf
+14 TL
+72 720 Td
+(Release summary) Tj
+T* (Production identifier: AURORA-7319.) Tj
+T* (Lead engineer: Lina Patel.) Tj
+T* (Target release date: February 14, 2027.) Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 8 0 R >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000127 00000 n 
+0000000197 00000 n 
+0000000420 00000 n 
+0000000546 00000 n 
+0000000760 00000 n 
+0000000886 00000 n 
+0000001116 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+1242
+%%EOF

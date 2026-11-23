@@ -4,6 +4,7 @@ import { enrichSearchResults } from '@/lib/web-extract';
 import { planResearchQueries, detectEvidenceGaps } from '@/lib/research-planner';
 import { generateResearchPlan } from '@/lib/openrouter';
 import { stripLeadingGreeting } from '@/lib/tasks';
+import { getUsageIdentity } from '@/lib/request-identity';
 
 export const maxDuration = 60;
 
@@ -113,6 +114,11 @@ export async function POST(request: NextRequest) {
           planningContext: initialSearch?.results,
           fallbackPlan: heuristicPlan || undefined,
           contextEntities: cleanContextEntities,
+          // The model planner spends OpenRouter requests. Without the visitor's own
+          // OpenRouter key it runs on the shared hosted key, which is only allowed
+          // when this search is metered against the hosted search quota. A
+          // client-supplied Tavily key alone must not unlock hosted model calls.
+          allowModelPlanner: Boolean(openrouterKey) || hostedQuota.mode === 'hosted-search',
         })
       : null;
 
@@ -232,15 +238,16 @@ async function buildResearchPlan(
     planningContext?: Array<{ title: string; url: string; snippet?: string }>;
     fallbackPlan?: { queries: string[]; entities?: string[] };
     contextEntities?: string[];
+    allowModelPlanner: boolean;
   }
 ): Promise<{ queries: string[]; entities?: string[]; planner: 'model' | 'heuristic' }> {
-  const modelPlan = await generateResearchPlan(query, {
+  const modelPlan = options.allowModelPlanner ? await generateResearchPlan(query, {
     apiKey: options.apiKey,
     preferredModel: options.model,
     deep: options.deep,
     timeoutMs: RESEARCH_PLANNER_BUDGET_MS,
     planningContext: options.planningContext,
-  });
+  }) : null;
   if (modelPlan?.queries.length) {
     const maxQueries = options.deep ? 7 : 5;
     // Model plan queries prioritized over fallback queries so model-planned queries survive plan merging
@@ -295,7 +302,7 @@ function getHostedSearchQuotaStatus(request: NextRequest, clientKey: string | nu
   }
 
   const limit = getHostedSearchDailyLimit();
-  const identity = getUsageIdentity(request);
+  const identity = getUsageIdentity(request.headers);
   const now = Date.now();
   const resetAt = getNextUtcMidnight(now);
   const existing = hostedSearchUsage.get(identity);
@@ -391,13 +398,6 @@ function hostedSearchHeaders(
 function getHostedSearchDailyLimit(): number {
   const value = Number(process.env.OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT || 15);
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : 15;
-}
-
-function getUsageIdentity(request: NextRequest): string {
-  const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  const realIp = request.headers.get('x-real-ip')?.trim();
-  const cfIp = request.headers.get('cf-connecting-ip')?.trim();
-  return cfIp || forwardedFor || realIp || 'local';
 }
 
 function getNextUtcMidnight(now: number): number {

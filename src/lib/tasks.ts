@@ -297,8 +297,14 @@ export function needsWebResearch(text: string): boolean {
     return false;
   }
 
-  // Explicit verification or citation requests
-  if (/\b(source|sources|cite|citation|research|verify|fact check|fact-check|is this true|confirm)\b/.test(lower)) {
+  // Explicit verification or citation requests. "Research" used as a noun
+  // modifier ("a research plan", "my research question") describes the
+  // deliverable, not a request to search the web.
+  const withoutResearchArtifacts = lower.replace(
+    /\bresearch\s+(?:plans?|proposals?|designs?|questions?|methodology|methods|papers?|outlines?|agendas?|protocols?|hypothes[ie]s|topics?|ideas?|goals?|objectives?)\b/g,
+    ' '
+  );
+  if (/\b(source|sources|cite|citation|research|verify|fact check|fact-check|is this true|confirm)\b/.test(withoutResearchArtifacts)) {
     return true;
   }
 

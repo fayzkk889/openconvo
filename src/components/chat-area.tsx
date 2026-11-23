@@ -98,6 +98,11 @@ export function ChatArea({
   const bottomRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  // The composer overlays the bottom of the message list. Its height changes
+  // with error banners, research progress, attachments, and multi-line input,
+  // so the list reserves exactly that much space instead of a fixed guess.
+  const composerOverlayRef = useRef<HTMLDivElement>(null);
+  const [composerInset, setComposerInset] = useState<number | null>(null);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
   const { artifacts, updateArtifact, deleteArtifact } = useArtifacts(conversation, messages, isStreaming);
   const selectedModelInfo = models.find((model) => model.id === selectedModel);
@@ -135,6 +140,14 @@ export function ChatArea({
       scrollToBottom();
     }
   }, [messages, isStreaming]);
+
+  useEffect(() => {
+    const overlay = composerOverlayRef.current;
+    if (!overlay || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setComposerInset(overlay.offsetHeight));
+    observer.observe(overlay);
+    return () => observer.disconnect();
+  }, [conversationId]);
 
   // Initial scroll to bottom when conversation loads
   useEffect(() => {
@@ -182,6 +195,7 @@ export function ChatArea({
       <div 
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-4 pb-44 pt-6 md:px-8 md:pt-8"
+        style={composerInset !== null ? { paddingBottom: composerInset + 16 } : undefined}
       >
         <div className="mx-auto flex max-w-4xl flex-col gap-1">
           {messages.map((message, index) => {
@@ -208,6 +222,7 @@ export function ChatArea({
       {showScrollButton && (
         <button
           onClick={scrollToBottom}
+          style={composerInset !== null ? { bottom: composerInset + 12 } : undefined}
           className="absolute bottom-36 left-1/2 -translate-x-1/2 bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] p-2 rounded-full shadow-lg text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-all z-10"
           aria-label="Scroll to bottom"
         >
@@ -215,7 +230,7 @@ export function ChatArea({
         </button>
       )}
 
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[var(--color-bg-primary)] via-[var(--color-bg-primary)] to-transparent px-3 pb-4 pt-14 md:px-6 md:pb-6">
+      <div ref={composerOverlayRef} className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[var(--color-bg-primary)] via-[var(--color-bg-primary)] to-transparent px-3 pb-4 pt-14 md:px-6 md:pb-6">
         <div className="mx-auto max-w-4xl">
           {researchStatus && (
             <ResearchProgress status={researchStatus} />

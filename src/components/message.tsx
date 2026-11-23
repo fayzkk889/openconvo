@@ -20,6 +20,7 @@ import { MessageActions } from '@/components/message-actions';
 import { getModelName } from '@/lib/models';
 import { safeExternalUrl } from '@/lib/utils';
 import { TASK_PRESETS } from '@/lib/tasks';
+import { messageStatusNotice } from '@/lib/message-status';
 import type { Message as MessageType } from '@/types/chat';
 
 interface MessageProps {
@@ -53,6 +54,7 @@ export function Message({
     : null;
   const showStreamingCursor =
     isStreaming && isAssistant && !message.content && !message.isError;
+  const statusNotice = messageStatusNotice(message);
 
   if (message.role === 'system') return null;
 
@@ -196,6 +198,16 @@ export function Message({
                   <MarkdownRenderer content={message.content} />
                 </div>
               )
+            )}
+
+            {statusNotice && !isStreaming && (
+              <p
+                role="status"
+                className="mt-2 flex items-start gap-1.5 text-xs text-[var(--color-text-tertiary)]"
+              >
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>{statusNotice}</span>
+              </p>
             )}
 
             {/* User attachments */}

@@ -2,7 +2,7 @@ import { exportAllData, importAllData } from './storage';
 import { Artifact, Attachment, Conversation, Message, Project, SearchResultRef, MessageStatus, TokenUsage } from '@/types/chat';
 import { DocumentRecord, DocumentChunk, DocumentExcerpt, DocumentProcessingStatus } from '@/types/document';
 import { DEFAULT_SETTINGS, ExportedSettings, Settings } from '@/types/settings';
-import { resolveSafeModelId } from '@/lib/models';
+import { isFreeModelId, resolveSafeModelId } from '@/lib/models';
 import { normalizeTaskType } from '@/lib/tasks';
 
 const MAX_IMPORT_ITEMS = 10000;
@@ -274,7 +274,10 @@ export function validateMessage(value: unknown): Message {
     conversationId: message.conversationId,
     role: message.role as Message['role'],
     content: message.content.slice(0, MAX_MESSAGE_CHARS),
-    model: typeof message.model === 'string' ? resolveSafeModelId(message.model) : undefined,
+    // Message.model records which model produced the answer. It never selects a
+    // model for new requests, so keep the historical id (free ids only) instead of
+    // relabeling answers from retired models as the current default.
+    model: typeof message.model === 'string' && isFreeModelId(message.model) ? message.model.trim().slice(0, 200) : undefined,
     attachments: normalizeImportedAttachments(message.attachments),
     searchResults: normalizeImportedSearchResults(message.searchResults),
     researchTrace: normalizeImportedResearchTrace(message.researchTrace),

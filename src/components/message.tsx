@@ -86,9 +86,9 @@ export function Message({
             <span className="font-semibold text-sm text-[var(--color-text-primary)]">
               {isUser ? 'You' : getModelName(message.model || 'AI')}
             </span>
-            {isAssistant && message.model && (
+            {isAssistant && message.model && getModelName(message.model) !== modelShortId(message.model) && (
               <span className="text-[10px] font-medium text-[var(--color-text-tertiary)]">
-                {message.model.split('/').pop()?.replace(':free', '')}
+                {modelShortId(message.model)}
               </span>
             )}
             {isAssistant && message.researchMode && (
@@ -473,4 +473,8 @@ function SourcePills({ sources }: { sources: NonNullable<MessageType['searchResu
       })}
     </div>
   );
+}
+
+function modelShortId(modelId: string): string {
+  return modelId.split('/').pop()?.replace(':free', '') ?? modelId;
 }

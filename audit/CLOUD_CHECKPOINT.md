@@ -45,3 +45,6 @@ Review the diff, then commit on `audit/rc-3-cloud` and deploy to a Preview with 
 - Done: shared atomic quota store (O-01), Wikipedia keyless search (D-19), Playwright e2e suite with Chrome IME composition, native CDP file drag-drop and synthetic paste (D-20), docs/`check:env` refresh (D-21).
 - Gates: `npm test` (137 checks, RC-3 26/26, RC-4 15/15), `tsc`, `next build`, `npm run test:e2e` 9/9.
 - Still open: a live Upstash/Vercel KV store (account decision; production stays BYOK-only until one is configured); a live BYOK call with a real visitor key (needs the owner's own key, which an agent must not enter); a true OS-level drag from the file manager and real clipboard paste (automation uses the browser drag pipeline and synthetic ClipboardEvent).
+- Released: PR #2 merged as `754c54a`; Vercel production deployment succeeded. Pre-release production was `3a9a597` (rollback: Vercel Instant Rollback, or `git revert -m 1 754c54a`).
+- Production smoke (no provider spend): `/api/config` hosted off; keyless chat and search 401 with guidance; strict CSP without the Preview-only vercel.live allowance; PDF worker 200; `/app` loads; only console errors are the two deliberate 401 probes.
+- Merged branches `audit/rc-3-cloud` and `feat/rc-4-followups` deleted.

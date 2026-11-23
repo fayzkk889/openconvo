@@ -152,8 +152,12 @@ export async function searchWebMany(
     : rankedResults;
   const results = diversifyResearchResults(gatedResults, rankingQuery, entities)
     .slice(0, maxCombinedResultsForMode(mode));
+  // Every provider that returned results for any planned query, not just the
+  // first one per query, so the metadata reflects where evidence came from.
   const providers = Array.from(new Set(responses.flatMap((response) =>
-    response.provider && response.provider !== 'none' ? [response.provider] : []
+    response.providers?.length
+      ? response.providers
+      : response.provider && response.provider !== 'none' ? [response.provider] : []
   ).concat(seededResults.length > 0 ? ['source-seeds'] : [])));
   const providerErrors = Array.from(new Set(responses.flatMap((response) => response.providerErrors || [])));
 

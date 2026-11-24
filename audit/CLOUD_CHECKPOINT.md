@@ -53,3 +53,7 @@ Review the diff, then commit on `audit/rc-3-cloud` and deploy to a Preview with 
 - Done: tool-calling loop in `/api/chat` (`web_search`, `read_page`), keyless parallel sources incl. news feeds, relevance gate, pinned page fetch, client no longer pre-searches or answers greetings itself, live status line and sources from tool events, docs and privacy/security text.
 - Gates: see CLOUD_TEST_RESULTS RC-5.
 - Caveat recorded in DEPLOYMENT.md: news RSS feeds and result-page scraping are not official APIs (their terms limit feed use to personal readers); `OPENCONVO_NEWS_FEEDS=off` disables the feeds.
+- Live Preview fixes before release: a rate-limited model family is skipped instead of giving up (`2ba92fa`); pre-search narration is withdrawn and Google News chips show publisher domains (`af97f21`); every cited source is listed in the appendix (`b1bd3da`). Final gates: `npm test` (141 checks, RC-3 26/26, RC-4 15/15, RC-5 20/20), `tsc`, `next build`, Playwright 11/11.
+- Released: PR #3 merged as `f44f7ea`; Vercel production deployment succeeded. Pre-release production was `d0a52b9` (rollback: Vercel Instant Rollback, or `git revert -m 1 f44f7ea`).
+- Production smoke (no provider spend): `/api/config` hosted off (BYOK-only, unchanged); keyless chat 401 with guidance; `/app` 200; privacy and security pages serve the new search and page-pinning text.
+- Open: live behaviour of small free models with tools; answers on the slowest models (Nemotron Ultra) can approach the 60 s function limit when they search.

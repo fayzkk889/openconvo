@@ -424,6 +424,15 @@ await test('Narration before a tool call is withdrawn; Google News items show th
   assert.equal(google.domain, 'daily.example.org');
 });
 
+await test('Source appendix lists every cited source, even beyond the eighth', async () => {
+  const { buildSourcesAppendixIfMissing } = await import('@/lib/research-citations');
+  const sources = Array.from({ length: 12 }, (_, i) => ({ title: `T${i + 1}`, url: `https://x${i + 1}.example/a` }));
+  const appendix = buildSourcesAppendixIfMissing('Answer [9][10] and [4].', sources);
+  const cited = appendix.split('**Additional Retrieved Sources**')[0];
+  for (const n of [4, 9, 10]) assert.match(cited, new RegExp(`^${n}\\. \\[T${n}\\]`, 'm'));
+  assert.equal((appendix.match(/^\d+\. /gm) || []).length, 8, 'uncited sources only fill up to 8 lines');
+});
+
 // Runs last: it leaves Google models in the route's rate-limit cooldown.
 await test('A rate-limited model family is skipped: fallback goes to a different provider', async () => {
   installUpstream((body) => body.model.startsWith('google/')

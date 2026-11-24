@@ -81,6 +81,7 @@ export type ToolSessionOptions = {
 };
 
 const MAX_PAGE_CHARS_FOR_MODEL = 4000;
+const MAX_SOURCES_PER_ANSWER = 30;
 const MAX_SNIPPET_CHARS_FOR_MODEL = 400;
 
 export class ToolSession {
@@ -130,7 +131,13 @@ export class ToolSession {
       });
       response.providers.forEach((p) => this.providers.add(p));
       response.providerErrors.forEach((e) => this.providerErrors.add(e));
-      const numbered = response.results.map((result) => this.addSource(result));
+      // Numbering is capped so every cited [n] fits the sources list (30).
+      const numbered: Array<{ index: number; result: SearchResult }> = [];
+      for (const result of response.results) {
+        const known = this.sources.some((s) => s.url === result.url);
+        if (!known && this.sources.length >= MAX_SOURCES_PER_ANSWER) continue;
+        numbered.push(this.addSource(result));
+      }
       this.options.onActivity?.({ name: 'web_search', status: 'done', query, kind, resultCount: numbered.length });
 
       if (numbered.length === 0) {

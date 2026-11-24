@@ -232,16 +232,115 @@ export async function validateOutboundDestinationWithDns(value: string | URL): P
   return syncCheck;
 }
 
-export async function fetchReadablePage(url: string, parentSignal?: AbortSignal): Promise<string | null> {
-  // Step 0: Network destination policy enforcement.
-  // Unless explicitly enabled via OPENCONVO_ENABLE_PAGE_EXTRACTION=true (where dedicated socket
-  // or egress proxy guarantees are verified), arbitrary page extraction is safely bypassed
-  // to prevent DNS-rebinding / TOCTOU attacks in unproxied environments, retaining supported search snippets.
-  if (process.env.OPENCONVO_ENABLE_PAGE_EXTRACTION !== 'true') {
-    return null;
-  }
+export type PageResponse = {
+  status: number;
+  location?: string;
+  contentType: string;
+  contentLength?: number;
+  body: string;
+};
 
-  const validation = await validateOutboundDestinationWithDns(url);
+export type PageTransport = (url: URL, signal: AbortSignal) => Promise<PageResponse>;
+
+/**
+ * Page extraction is on unless OPENCONVO_ENABLE_PAGE_EXTRACTION=false. The
+ * DNS-rebinding gap that kept it off is closed by pinnedTransport: the socket
+ * connects only to an address that passed the private-network check.
+ */
+export function isPageExtractionEnabled(): boolean {
+  return process.env.OPENCONVO_ENABLE_PAGE_EXTRACTION !== 'false';
+}
+
+/**
+ * Resolve a hostname and refuse it when ANY returned address is private,
+ * loopback, link-local or otherwise blocked. Used as the socket's `lookup`, so
+ * the address that was checked is the address that is connected to: a second
+ * DNS answer cannot redirect the connection to an internal host.
+ */
+export function safeLookup(
+  hostname: string,
+  options: { all?: boolean; family?: number } | number | undefined,
+  callback: (...args: unknown[]) => void
+): void {
+  const wantAll = typeof options === 'object' && options !== null && options.all === true;
+  import('node:dns').then((dns) => {
+    dns.lookup(hostname, { all: true }, (error, addresses) => {
+      if (error) {
+        callback(error);
+        return;
+      }
+      const list = (addresses as Array<{ address: string; family: number }>) || [];
+      const blocked = list.find((entry) => isBlockedHostname(entry.address));
+      if (list.length === 0 || blocked) {
+        const err = new Error(`Destination ${hostname} resolves to a blocked address`) as NodeJS.ErrnoException;
+        err.code = 'EBLOCKED';
+        callback(err);
+        return;
+      }
+      if (wantAll) callback(null, list);
+      else callback(null, list[0].address, list[0].family);
+    });
+  }, (error) => callback(error));
+}
+
+/** GET over node:http(s) with the socket pinned through safeLookup. */
+export const pinnedTransport: PageTransport = async (url, signal) => {
+  const mod = url.protocol === 'https:' ? await import('node:https') : await import('node:http');
+  return new Promise<PageResponse>((resolve, reject) => {
+    const req = mod.request(url, {
+      method: 'GET',
+      signal,
+      lookup: safeLookup as never,
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.8',
+        'User-Agent': DEFAULT_USER_AGENT,
+      },
+    }, (res) => {
+      const status = res.statusCode || 0;
+      const contentType = String(res.headers['content-type'] || '');
+      const lengthHeader = Number(res.headers['content-length'] || 0);
+      const location = typeof res.headers.location === 'string' ? res.headers.location : undefined;
+      if ((status >= 300 && status < 400) || status >= 400 || !isReadableContentType(contentType) ||
+        (Number.isFinite(lengthHeader) && lengthHeader > MAX_FETCH_BYTES)) {
+        res.resume();
+        resolve({ status, location, contentType, contentLength: lengthHeader || undefined, body: '' });
+        return;
+      }
+      const chunks: Buffer[] = [];
+      let total = 0;
+      res.on('data', (chunk: Buffer) => {
+        if (total >= MAX_FETCH_BYTES) return;
+        const remaining = MAX_FETCH_BYTES - total;
+        chunks.push(chunk.length > remaining ? chunk.subarray(0, remaining) : chunk);
+        total += chunk.length;
+        if (total >= MAX_FETCH_BYTES) res.destroy();
+      });
+      const finish = () => resolve({
+        status,
+        contentType,
+        contentLength: lengthHeader || undefined,
+        body: Buffer.concat(chunks).toString('utf8'),
+      });
+      res.on('end', finish);
+      res.on('close', finish);
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.end();
+  });
+};
+
+let pageTransport: PageTransport = pinnedTransport;
+
+/** Tests replace the network transport; production always uses pinnedTransport. */
+export function __setPageTransportForTests(transport: PageTransport | null): void {
+  pageTransport = transport || pinnedTransport;
+}
+
+export async function fetchReadablePage(url: string, parentSignal?: AbortSignal): Promise<string | null> {
+  if (!isPageExtractionEnabled()) return null;
+
+  const validation = validateOutboundDestination(url);
   if (!validation.safe || !validation.url) return null;
 
   let currentUrl = validation.url;
@@ -251,10 +350,7 @@ export async function fetchReadablePage(url: string, parentSignal?: AbortSignal)
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(new Error('Page fetch timed out')), FETCH_TIMEOUT_MS);
-
-  const onParentAbort = () => {
-    controller.abort(parentSignal?.reason || new Error('User stopped request'));
-  };
+  const onParentAbort = () => controller.abort(parentSignal?.reason || new Error('User stopped request'));
 
   if (parentSignal) {
     if (parentSignal.aborted) {
@@ -265,33 +361,17 @@ export async function fetchReadablePage(url: string, parentSignal?: AbortSignal)
   }
 
   try {
-    let response: Response | null = null;
+    let response: PageResponse | null = null;
 
-    // Follow redirects manually with revalidation on every hop (SSRF redirect protection)
+    // Follow redirects manually, revalidating every hop.
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       if (controller.signal.aborted) break;
+      const res = await pageTransport(currentUrl, controller.signal);
 
-      const res = await fetch(currentUrl.href, {
-        signal: controller.signal,
-        redirect: 'manual',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.8',
-          'User-Agent': DEFAULT_USER_AGENT,
-        },
-      });
-
-      // If redirect, revalidate destination before following
       if ([301, 302, 303, 307, 308].includes(res.status)) {
-        const location = res.headers.get('location');
-        if (!location) return null;
-
-        const nextUrl = new URL(location, currentUrl);
-        const nextValidation = await validateOutboundDestinationWithDns(nextUrl);
-        if (!nextValidation.safe || !nextValidation.url) {
-          // Block redirect to internal / private / non-http destination!
-          return null;
-        }
-
+        if (!res.location) return null;
+        const nextValidation = validateOutboundDestination(new URL(res.location, currentUrl));
+        if (!nextValidation.safe || !nextValidation.url) return null;
         currentUrl = nextValidation.url;
         continue;
       }
@@ -300,29 +380,15 @@ export async function fetchReadablePage(url: string, parentSignal?: AbortSignal)
       break;
     }
 
-    if (!response || !response.ok) return null;
-
-    const contentType = response.headers.get('content-type') || '';
-    if (!isReadableContentType(contentType)) {
+    if (!response || response.status < 200 || response.status >= 300) return null;
+    if (!isReadableContentType(response.contentType) || !response.body.trim()) {
       setCachedPage(cacheKey, null);
       return null;
     }
 
-    const contentLength = Number(response.headers.get('content-length') || 0);
-    if (Number.isFinite(contentLength) && contentLength > MAX_FETCH_BYTES) {
-      setCachedPage(cacheKey, null);
-      return null;
-    }
-
-    const html = await readLimitedResponse(response);
-    if (!html.trim()) {
-      setCachedPage(cacheKey, null);
-      return null;
-    }
-
-    const text = contentType.includes('text/plain')
-      ? html
-      : extractReadableText(html);
+    const text = response.contentType.includes('text/plain')
+      ? response.body
+      : extractReadableText(response.body);
     const content = text ? text.slice(0, MAX_EXTRACTED_CHARS) : null;
     setCachedPage(cacheKey, content);
     return content;
@@ -330,9 +396,7 @@ export async function fetchReadablePage(url: string, parentSignal?: AbortSignal)
     return null;
   } finally {
     clearTimeout(timeout);
-    if (parentSignal) {
-      parentSignal.removeEventListener('abort', onParentAbort);
-    }
+    if (parentSignal) parentSignal.removeEventListener('abort', onParentAbort);
   }
 }
 
@@ -405,43 +469,6 @@ function prunePageCache(): void {
   }
 }
 
-async function readLimitedResponse(response: Response): Promise<string> {
-  if (!response.body) {
-    return (await response.text()).slice(0, MAX_FETCH_BYTES);
-  }
-
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-
-  while (total < MAX_FETCH_BYTES) {
-    const { done, value } = await reader.read();
-    if (done || !value) break;
-    const remaining = MAX_FETCH_BYTES - total;
-    chunks.push(value.length > remaining ? value.slice(0, remaining) : value);
-    total += value.length;
-  }
-
-  try {
-    await reader.cancel();
-  } catch {
-    // ignored
-  }
-
-  return new TextDecoder().decode(concatChunks(chunks));
-}
-
-function concatChunks(chunks: Uint8Array[]): Uint8Array {
-  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return merged;
-}
-
 function extractReadableText(html: string): string {
   const withoutNoise = html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -469,6 +496,8 @@ function extractReadableText(html: string): string {
 
 function decodeHtml(value: string): string {
   return value
+    .replace(/&#x([0-9a-f]{1,6});/gi, (_, hex: string) => safeCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d{1,7});/g, (_, dec: string) => safeCodePoint(parseInt(dec, 10)))
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
@@ -480,4 +509,9 @@ function decodeHtml(value: string): string {
     .replace(/&rdquo;|&#8221;/g, '"')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>');
+}
+
+function safeCodePoint(code: number): string {
+  if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return ' ';
+  return String.fromCodePoint(code);
 }

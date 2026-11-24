@@ -34,7 +34,7 @@ export default function PrivacyPage() {
             <ShieldCheck className="h-5 w-5" />
             <h2 className="mt-4 text-lg font-semibold">Document Intelligence & Retrieval</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">
-              Uploaded files (PDF, text, code, CSV) are parsed and indexed 100% locally in your browser. Document text is never transmitted to external vector databases, embeddings services, or web search engines. When you query your documents, only the most relevant retrieved excerpts are passed to the chosen model to generate grounded answers. Deleting a conversation or document permanently removes all corresponding indexed chunks.
+              Uploaded files (PDF, text, code, CSV) are parsed and indexed 100% locally in your browser. Document text is never transmitted to external vector databases, embeddings services, or web search engines. When you query your documents, only the most relevant retrieved excerpts are passed to the chosen model to generate grounded answers. When the model decides to search the web, the search query it writes (which can include terms from your conversation) is sent by the server to public search sources (Bing, DuckDuckGo, Google News, Wikipedia, and Tavily or SearxNG when configured). Deleting a conversation or document permanently removes all corresponding indexed chunks.
             </p>
           </section>
 

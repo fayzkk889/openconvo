@@ -1,10 +1,16 @@
-import { StreamingChatEvent, TokenUsage } from '@/types/chat';
+import { StreamingChatEvent, TokenUsage, SearchResultRef } from '@/types/chat';
 
 export interface OpenRouterDeltaChoice {
   delta?: {
     content?: string;
     reasoning?: string;
     role?: string;
+    tool_calls?: Array<{
+      index?: number;
+      id?: string;
+      type?: string;
+      function?: { name?: string; arguments?: string };
+    }>;
   };
   finish_reason?: string | null;
   index?: number;
@@ -21,8 +27,16 @@ export interface OpenRouterStreamChunk {
   };
 }
 
+export interface ToolCallDelta {
+  index: number;
+  id?: string;
+  name?: string;
+  arguments?: string;
+}
+
 export interface ParsedOpenRouterChunk {
   content?: string;
+  toolCalls?: ToolCallDelta[];
   reasoning?: string;
   finishReason?: string | null;
   model?: string;
@@ -122,8 +136,18 @@ export function parseOpenRouterPayload(payload: string): ParsedOpenRouterChunk |
       };
     }
 
+    const toolCalls = Array.isArray(choice?.delta?.tool_calls)
+      ? choice.delta.tool_calls.map((call, position) => ({
+          index: typeof call.index === 'number' ? call.index : position,
+          id: typeof call.id === 'string' ? call.id : undefined,
+          name: typeof call.function?.name === 'string' ? call.function.name : undefined,
+          arguments: typeof call.function?.arguments === 'string' ? call.function.arguments : undefined,
+        }))
+      : undefined;
+
     return {
       content: typeof content === 'string' ? content : undefined,
+      toolCalls: toolCalls?.length ? toolCalls : undefined,
       reasoning: typeof reasoning === 'string' ? reasoning : undefined,
       finishReason,
       model,
@@ -166,6 +190,8 @@ export interface StreamConsumerCallbacks {
   onInterrupted?: (interrupted: Extract<StreamingChatEvent, { type: 'interrupted' }>) => void;
   onError?: (error: Extract<StreamingChatEvent, { type: 'error' }>) => void;
   onResearchFallback?: (rf: Extract<StreamingChatEvent, { type: 'research_fallback' }>) => void;
+  onTool?: (tool: Extract<StreamingChatEvent, { type: 'tool' }>) => void;
+  onSources?: (sources: Extract<StreamingChatEvent, { type: 'sources' }>) => void;
 }
 
 export interface StreamConsumptionResult {
@@ -178,6 +204,10 @@ export interface StreamConsumptionResult {
   rateLimitedModels: string[];
   failedModels: string[];
   retryAfterSeconds?: number;
+  /** Sources the model found with its web tools during this answer. */
+  sources?: SearchResultRef[];
+  searchQueries?: string[];
+  searchProviders?: string[];
 }
 
 /**
@@ -203,6 +233,9 @@ export async function consumeChatStream(
   let retryAfterSeconds: number | undefined;
 
   let terminalReceived = false;
+  let sources: SearchResultRef[] | undefined;
+  let searchQueries: string[] | undefined;
+  let searchProviders: string[] | undefined;
 
   const handleEvent = (event: StreamingChatEvent) => {
     switch (event.type) {
@@ -263,6 +296,19 @@ export async function consumeChatStream(
         status = 'degraded';
         errorMessage = event.reason;
         callbacks?.onResearchFallback?.(event);
+        break;
+
+      case 'tool':
+        callbacks?.onTool?.(event);
+        break;
+
+      case 'sources':
+        if (Array.isArray(event.sources)) {
+          sources = event.sources;
+          searchQueries = Array.isArray(event.queries) ? event.queries : [];
+          searchProviders = Array.isArray(event.providers) ? event.providers : [];
+          callbacks?.onSources?.(event);
+        }
         break;
 
       case 'error':
@@ -344,5 +390,41 @@ export async function consumeChatStream(
     rateLimitedModels,
     failedModels,
     retryAfterSeconds,
+    sources,
+    searchQueries,
+    searchProviders,
   };
+}
+
+/**
+ * Rebuild complete tool calls from streamed fragments. Providers send the id
+ * and name once and the JSON arguments in pieces, keyed by index.
+ */
+export class ToolCallAccumulator {
+  private calls = new Map<number, { id?: string; name: string; arguments: string }>();
+
+  add(deltas: ToolCallDelta[] | undefined): void {
+    for (const delta of deltas || []) {
+      const current = this.calls.get(delta.index) || { name: '', arguments: '' };
+      if (delta.id) current.id = delta.id;
+      if (delta.name) current.name += delta.name;
+      if (delta.arguments) current.arguments += delta.arguments;
+      this.calls.set(delta.index, current);
+    }
+  }
+
+  get size(): number {
+    return Array.from(this.calls.values()).filter((call) => call.name).length;
+  }
+
+  toToolCalls(): Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> {
+    return Array.from(this.calls.entries())
+      .sort(([a], [b]) => a - b)
+      .filter(([, call]) => call.name)
+      .map(([index, call]) => ({
+        id: call.id || `call_${index}_${Math.random().toString(36).slice(2, 8)}`,
+        type: 'function' as const,
+        function: { name: call.name, arguments: call.arguments || '{}' },
+      }));
+  }
 }

@@ -260,7 +260,7 @@ export function Message({
                         </span>
                         {researchTrace.planner && (
                           <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">
-                            {researchTrace.planner === 'model' ? 'model-planned' : 'fallback-planned'}
+                            {researchTrace.planner === 'model' ? 'chosen by the model' : 'fallback-planned'}
                           </span>
                         )}
                         {(researchTrace.providers || (researchTrace.provider ? [researchTrace.provider] : [])).map((provider) => (
@@ -269,10 +269,10 @@ export function Message({
                           </span>
                         ))}
                       </div>
-                      {researchTrace.plannedQueries && researchTrace.plannedQueries.length > 1 && (
+                      {researchTrace.plannedQueries && researchTrace.plannedQueries.length > 0 && (
                         <div className="space-y-1">
                           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-tertiary)]">
-                            Queries
+                            Searches
                           </span>
                           <ol className="space-y-1">
                             {researchTrace.plannedQueries.map((query, index) => (

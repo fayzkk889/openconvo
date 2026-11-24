@@ -40,7 +40,7 @@ Nothing is strictly required. By default every visitor brings their own free Ope
 ### Hosted limits
 
 - `OPENCONVO_HOSTED_FREE_DAILY_LIMIT`: chat requests per visitor per UTC day. Default `20`.
-- `OPENCONVO_HOSTED_FREE_GLOBAL_DAILY_LIMIT`: chat requests for all keyless visitors together. Default `30`. A free OpenRouter key allows about 50 requests a day (failed requests count), and hosted research planning spends from the same key, so keep this plus the search cap at or below that.
+- `OPENCONVO_HOSTED_FREE_GLOBAL_DAILY_LIMIT`: chat requests for all keyless visitors together. Default `30`. A free OpenRouter key allows about 50 requests a day (failed requests count), and a hosted answer that searches makes one extra request (hosted answers get a single search round), so keep this at or below about half of that.
 - `OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT`: hosted searches per visitor per day. Default `15`.
 - `OPENCONVO_HOSTED_SEARCH_GLOBAL_DAILY_LIMIT`: hosted searches for all visitors together. Default `20`.
 
@@ -48,7 +48,13 @@ Counting is atomic in the shared store (one `INCRBY` per check), so concurrent r
 
 ### Search providers
 
-`TAVILY_API_KEY` and `SEARXNG_URL` are optional. Without them, search falls back to keyless DuckDuckGo and Bing HTML (often blocked from cloud IPs) and then the Wikipedia API, which works from Vercel but only covers encyclopedic topics. Visitors can add their own Tavily key in Settings for the best results.
+The model searches through a `web_search` tool: it decides whether a question needs a search, writes the query, and can search again or read a result page (`read_page`). Each answer is bounded: 3 search rounds with your own key (4 for Deep research), 1 in hosted mode, and the 52-second request limit. Endpoints that reject tool definitions are retried without tools.
+
+No search key is needed. Web searches query Bing and DuckDuckGo result pages and the Wikipedia API in parallel; news searches query the Bing News and Google News RSS feeds. Results that share too little with the query are dropped. `TAVILY_API_KEY` and `SEARXNG_URL` add extra sources when set. From Vercel, DuckDuckGo usually answers 403; the other sources work.
+
+The news feeds and result pages are not official APIs: their terms restrict feed use to personal, non-commercial feed readers, and they can change format or block a host without notice. Set `OPENCONVO_NEWS_FEEDS=off` to stop using the news feeds, and configure Tavily or SearxNG if you need a supported API.
+
+In hosted mode each search counts against the search quota above.
 
 ## Vercel Steps
 
@@ -96,4 +102,4 @@ After deployment:
 
 Without a shared quota store, hosted counters live in each serverless instance's memory. That is why production stays BYOK-only unless a store is configured.
 
-Fetching full web pages for research is off by default (`OPENCONVO_ENABLE_PAGE_EXTRACTION=true` turns it on). Research answers cite search snippets and Wikipedia lead sections.
+Reading full pages is on by default (`OPENCONVO_ENABLE_PAGE_EXTRACTION=false` turns it off). The model can only read URLs its own searches returned, and every connection is pinned to an address that passed the private-network check, so a DNS answer cannot redirect it to an internal host.

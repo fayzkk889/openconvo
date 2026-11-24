@@ -18,7 +18,7 @@ The public site has two surfaces:
 - Free-model-first OpenRouter integration with dynamic model discovery, `:free` filtering, and request-level zero-price enforcement.
 - Streaming chat with fallback across curated free models when a provider is temporarily rate limited.
 - Hosted free mode with server-side shared OpenRouter capacity and a daily per-visitor limit.
-- Automatic web research with query planning, provider fallback, page extraction, citations, source quality ranking, and a deeper research mode: Tavily, optional SearxNG, then lightweight keyless DuckDuckGo.
+- Model-driven web search: the model decides when to search and writes its own queries through a `web_search` tool (web or news), reads a result page when the snippet is not enough, and cites numbered sources. Search needs no key: Bing and DuckDuckGo results, Bing News and Google News feeds, and Wikipedia are queried in parallel and filtered for relevance. Tavily and SearxNG are optional extra sources. The search toggles and the Research tasks make a search required.
 - File uploads for text, markdown, code, JSON, CSV, and PDF context.
 - Projects with custom instructions and optional project default models.
 - Conversation title generation based on the first exchange.
@@ -91,7 +91,7 @@ NEXT_PUBLIC_SITE_URL=https://openconvo.vercel.app
 ```
 
 Production deployments are bring-your-own-key by default: visitors add a free OpenRouter key (and optionally a Tavily key) in Settings, and server keys are never lent to them. Vercel Previews lend the server keys to signed-in reviewers. To lend them on production, set `OPENCONVO_HOSTED_FREE=on` **and** a shared quota store (`UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` or Vercel KV's `KV_REST_API_URL`/`KV_REST_API_TOKEN`) so per-visitor and deployment-wide daily caps hold across serverless instances. See [DEPLOYMENT.md](DEPLOYMENT.md) for all limits.
-`TAVILY_API_KEY` and `SEARXNG_URL` are optional; without them search falls back to keyless DuckDuckGo, Bing and the Wikipedia API.
+`TAVILY_API_KEY` and `SEARXNG_URL` are optional; search works without them using keyless Bing, DuckDuckGo, Bing News, Google News and Wikipedia.
 `NEXT_PUBLIC_GITHUB_URL` is optional and only controls the GitHub link on the landing page.
 `NEXT_PUBLIC_SITE_URL` controls canonical social preview URLs and should match your production domain.
 
@@ -145,7 +145,7 @@ Free providers can be temporarily rate limited. Wait and retry, choose another f
 
 **Search unavailable**
 
-Add `TAVILY_API_KEY` in `.env.local` or Settings.
+Search needs no key. If every keyless source is blocked from your host, add `TAVILY_API_KEY` in `.env.local` or Settings, or point `SEARXNG_URL` at a SearxNG instance.
 
 **Models look stale**
 

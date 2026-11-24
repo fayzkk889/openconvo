@@ -48,3 +48,8 @@ Review the diff, then commit on `audit/rc-3-cloud` and deploy to a Preview with 
 - Released: PR #2 merged as `754c54a`; Vercel production deployment succeeded. Pre-release production was `3a9a597` (rollback: Vercel Instant Rollback, or `git revert -m 1 754c54a`).
 - Production smoke (no provider spend): `/api/config` hosted off; keyless chat and search 401 with guidance; strict CSP without the Preview-only vercel.live allowance; PDF worker 200; `/app` loads; only console errors are the two deliberate 401 probes.
 - Merged branches `audit/rc-3-cloud` and `feat/rc-4-followups` deleted.
+## Session 5 (2026-11-24): model-driven search
+- Branch `feat/model-driven-search`. The user found live answers poor (no search for a layoff-rumour question, WhatsApp results for a follow-up) and asked for search without Tavily and without hard-coded routing.
+- Done: tool-calling loop in `/api/chat` (`web_search`, `read_page`), keyless parallel sources incl. news feeds, relevance gate, pinned page fetch, client no longer pre-searches or answers greetings itself, live status line and sources from tool events, docs and privacy/security text.
+- Gates: see CLOUD_TEST_RESULTS RC-5.
+- Caveat recorded in DEPLOYMENT.md: news RSS feeds and result-page scraping are not official APIs (their terms limit feed use to personal readers); `OPENCONVO_NEWS_FEEDS=off` disables the feeds.

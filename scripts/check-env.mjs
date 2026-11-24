@@ -94,8 +94,13 @@ if (hasValue('NEXT_PUBLIC_SITE_URL') && !validUrl(process.env.NEXT_PUBLIC_SITE_U
   failures.push('NEXT_PUBLIC_SITE_URL must be a valid https URL.');
 }
 
-if (!hasValue('TAVILY_API_KEY') && !hasValue('SEARXNG_URL')) {
-  warnings.push('No Tavily key or SearxNG URL is set. Hosted search will use the lightweight keyless fallback.');
+const newsFeeds = (process.env.OPENCONVO_NEWS_FEEDS || '').trim().toLowerCase();
+if (newsFeeds && newsFeeds !== 'on' && newsFeeds !== 'off') {
+  failures.push('OPENCONVO_NEWS_FEEDS must be "on" or "off" when set.');
+}
+const pageExtraction = (process.env.OPENCONVO_ENABLE_PAGE_EXTRACTION || '').trim().toLowerCase();
+if (pageExtraction && pageExtraction !== 'true' && pageExtraction !== 'false') {
+  failures.push('OPENCONVO_ENABLE_PAGE_EXTRACTION must be "true" or "false" when set.');
 }
 
 if (hasValue('SEARXNG_URL') && !validUrl(process.env.SEARXNG_URL)) {

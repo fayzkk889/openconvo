@@ -1,21 +1,16 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
-import { Message, Attachment, ResearchTrace, ResearchStatus, RequestLifecycleState } from '@/types/chat';
-import type { TaskType, MessageStatus, TokenUsage } from '@/types/chat';
+import { Message, Attachment, ResearchStatus, RequestLifecycleState } from '@/types/chat';
+import type { TaskType, StreamingChatEvent, WebSearchPolicy } from '@/types/chat';
 import type { DocumentExcerpt, DocumentChunk } from '@/types/document';
 import { AIModel, ReliabilityOutcome } from '@/types/models';
-import { SearchResponse } from '@/types/search';
 import * as storage from '@/lib/storage';
 import { generateId } from '@/lib/utils';
 import { buildResearchFallbackAnswer } from '@/lib/research-fallback';
-import { ensureResearchCitations } from '@/lib/research-citations';
-import { buildDocumentAppendixIfMissing } from '@/lib/document-citations';
 import { retrieveDocumentExcerpts } from '@/lib/document-retrieval';
 import { shouldRetrieveConversationDocuments } from '@/lib/document-followup';
 import { buildConversationTitle } from '@/lib/title';
-import { isCasualGreeting, stripLeadingGreeting, resolveWorkflow } from '@/lib/tasks';
-import { extractConversationContextEntities, needsConversationContext } from '@/lib/research-planner';
 import {
   buildApiMessages,
   historyBeforeMessage,
@@ -27,7 +22,6 @@ import { consumeChatStream } from '@/lib/sse-parser';
 
 const STREAM_FLUSH_MS = 18;
 const STREAM_FINISH_BUDGET_MS = 900;
-const SEARCH_REQUEST_TIMEOUT_MS = 70 * 1000;
 const TITLE_REQUEST_TIMEOUT_MS = 20 * 1000;
 const EMPTY_RESPONSE_RETRY_ATTEMPTS = 2;
 const RESEARCH_RETRY_SOURCE_LIMITS = [10, 7, 5];
@@ -196,21 +190,13 @@ export function useChat(
       const activeModel = modelOverride || model;
 
       try {
-        // Step 4: Authoritative workflow resolution
-        const workflow = resolveWorkflow({
-          content,
-          attachments,
-          taskType,
-          searchEnabled,
-          researchEnabled,
-        });
-
-        const effectiveTaskType = workflow.taskType;
-        const isQuickTask = workflow.isQuickTask;
-        const isResearchTask = workflow.shouldSearch;
-        const shouldUseSearch = !isQuickTask && isResearchTask;
-        const shouldUseResearch = shouldUseSearch && workflow.searchMode !== 'search';
-        const searchMode = workflow.searchMode === 'none' ? 'search' : workflow.searchMode;
+        // The model decides whether and what to search (web_search tool). The
+        // user can still require a web-backed answer: the search toggles, or an
+        // explicitly chosen Research / Deep research task.
+        const effectiveTaskType: TaskType = taskType || 'auto';
+        const explicitResearchTask = !autoRouted && (effectiveTaskType === 'research' || effectiveTaskType === 'deep-research');
+        const webSearch = webSearchPolicy({ searchEnabled, researchEnabled, explicitResearchTask });
+        const shouldUseResearch = webSearch === 'required';
 
         // Save user message
         const userMessage = await storage.addMessage(targetConversationId, {
@@ -280,109 +266,12 @@ export function useChat(
           console.warn('Document retrieval resolution failed:', docErr);
         }
 
-        // Casual greeting shortcut
-        if (isCasualGreeting(content)) {
-          const assistantMessage = await storage.addMessage(targetConversationId, {
-            role: 'assistant',
-            content: 'Hey! How can I help?',
-            model: activeModel,
-            researchMode: false,
-            agentMode: false,
-            taskType: 'quick',
-            autoRouted,
-            routingNote,
-          });
-
-          if (!assistantMessage || activeRunRef.current?.id !== runId || activeConversationIdRef.current !== targetConversationId) {
-            return;
-          }
-
-          setMessages((prev) => [...prev, assistantMessage]);
-
-          // Step 7: Greeting shortcut must not rename an established conversation
-          const existingMessages = await storage.getMessages(targetConversationId);
-          if (existingMessages.length <= 2 && onTitleGenerated) {
-            onTitleGenerated('Greeting');
-          }
-
-          run.state = 'completed';
-          return;
-        }
-
         // Title generation: immediate local title if first turn
         const currentMessages = await storage.getMessages(targetConversationId);
         const isFirstTurn = currentMessages.length <= 1;
         const localTitle = buildConversationTitle(content.trim());
         if (isFirstTurn && onTitleGenerated) {
           onTitleGenerated(localTitle);
-        }
-
-        // Perform web search if needed
-        let searchResults: SearchResponse | null = null;
-        if (shouldUseSearch) {
-          run.state = 'searching';
-          setLifecycleState('searching');
-          const initialPhase = shouldUseResearch ? 'planning' : 'searching';
-          setResearchStatus({
-            phase: initialPhase,
-            mode: searchMode,
-            label: researchStatusLabel(initialPhase, searchMode),
-          });
-
-          try {
-            // Data minimization: earlier conversation entities leave the browser only
-            // when the query cannot be understood without them (e.g. "what about its pricing?").
-            const searchQuery = stripLeadingGreeting(content);
-            const contextEntities = needsConversationContext(searchQuery)
-              ? extractConversationContextEntities(messages)
-              : [];
-
-            const searchRes = await fetchWithTimeout(
-              '/api/search',
-              {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(tavilyApiKey ? { 'x-tavily-key': tavilyApiKey } : {}),
-                  ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
-                },
-                body: JSON.stringify({
-                  query: searchQuery,
-                  mode: searchMode,
-                  model: activeModel,
-                  contextEntities: contextEntities.length > 0 ? contextEntities : undefined,
-                }),
-              },
-              SEARCH_REQUEST_TIMEOUT_MS,
-              runController.signal
-            );
-
-            if (activeRunRef.current?.id !== runId || activeConversationIdRef.current !== targetConversationId) {
-              return;
-            }
-
-            if (searchRes.ok) {
-              searchResults = await searchRes.json();
-              setResearchStatus({
-                phase: 'synthesizing',
-                mode: searchMode,
-                label: researchStatusLabel('synthesizing', searchMode),
-                plannedQueries: searchResults?.plannedQueries?.length,
-                sourceCount: searchResults?.results?.length,
-                openedCount: searchResults?.results?.filter((result) => result.extracted).length,
-              });
-            } else {
-              const err = await searchRes.json().catch(() => ({}));
-              setError(err.error || 'Search failed; continuing without web results');
-            }
-          } catch (err) {
-            if ((err as Error).name === 'AbortError' || runController.signal.aborted) {
-              run.state = 'cancelled';
-              return;
-            }
-            console.error('Search failed:', err);
-            setError('Search failed; continuing without web results');
-          }
         }
 
         if (activeRunRef.current?.id !== runId || activeConversationIdRef.current !== targetConversationId) {
@@ -417,28 +306,13 @@ export function useChat(
             autoRouted,
             routingNote,
             compareRun: runModels.length > 1,
-            searchResults: searchResults?.results?.map((r, index) => ({
-              id: r.id || `src_${index + 1}`,
-              title: r.title,
-              url: r.url,
-              canonicalUrl: r.canonicalUrl || r.url,
-              domain: r.domain,
-              publishedAt: r.publishedAt,
-              snippet: r.snippet,
-              content: r.content,
-              extracted: r.extracted,
-              fetchedAt: r.fetchedAt || Date.now(),
-              sourceScore: r.sourceScore,
-              sourceLabel: r.sourceLabel,
-              sourceReason: r.sourceReason,
-            })),
-            researchTrace: buildResearchTrace(searchResults),
             documentExcerpts,
             timestamp: Date.now(),
           };
 
           setMessages((prev) => [...prev, placeholderMessage]);
           setResearchStatus(null);
+          const toolEvents = createToolEventHandlers(placeholderMessage, setMessages, setResearchStatus);
 
           let finalModel = runModel;
           try {
@@ -456,6 +330,7 @@ export function useChat(
               headers: {
                 'Content-Type': 'application/json',
                 ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
+                ...(tavilyApiKey ? { 'x-tavily-key': tavilyApiKey } : {}),
               },
               body: JSON.stringify({
                 messages: apiMessages,
@@ -464,12 +339,12 @@ export function useChat(
                   .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
                   .map((item) => item.id),
                 systemPrompt: systemPrompt || undefined,
-                searchResults: searchResults?.results,
                 attachments: toWireAttachments(attachments),
                 documentExcerpts,
                 researchMode: shouldUseResearch,
                 agentMode: agentEnabled === true,
                 taskType: effectiveTaskType,
+                webSearch,
               }),
               signal: runController.signal,
             });
@@ -487,8 +362,11 @@ export function useChat(
                 },
                 onDelta: (delta) => {
                   if (delta.model) finalModel = delta.model;
+                  toolEvents.onDelta();
                   streamDisplay?.append(delta.content);
                 },
+                onTool: toolEvents.onTool,
+                onSources: toolEvents.onSources,
                 onFallback: (fb) => {
                   if (fb.toModel) finalModel = fb.toModel;
                   if (fb.rateLimitedModels?.length) {
@@ -552,7 +430,7 @@ export function useChat(
               role: 'assistant',
               content: fullContent,
               model: finalModel,
-              researchMode: shouldUseResearch,
+              researchMode: placeholderMessage.researchMode,
               agentMode: agentEnabled === true,
               taskType: effectiveTaskType,
               autoRouted,
@@ -603,7 +481,7 @@ export function useChat(
                     role: 'assistant',
                     content: partial,
                     model: finalModel,
-                    researchMode: shouldUseResearch,
+                    researchMode: placeholderMessage.researchMode,
                     agentMode: agentEnabled === true,
                     taskType: effectiveTaskType,
                     autoRouted,
@@ -639,13 +517,13 @@ export function useChat(
               onModelOutcome?.({ modelId: runModel, taskType: effectiveTaskType, outcome: 'failure' });
             }
 
-            const fallbackContent = buildClientResearchFallback(content.trim(), placeholderMessage.searchResults, errorMessage, shouldUseSearch);
+            const fallbackContent = buildClientResearchFallback(content.trim(), placeholderMessage.searchResults, errorMessage, Boolean(placeholderMessage.searchResults?.length));
             if (fallbackContent) {
               const storedFallback = await storage.addMessage(targetConversationId, {
                 role: 'assistant',
                 content: fallbackContent,
                 model: runModel,
-                researchMode: shouldUseResearch,
+                researchMode: placeholderMessage.researchMode,
                 agentMode: agentEnabled === true,
                 taskType: effectiveTaskType,
                 autoRouted,
@@ -672,7 +550,7 @@ export function useChat(
               role: 'assistant',
               content: errorMessage,
               model: runModel,
-              researchMode: shouldUseResearch,
+              researchMode: placeholderMessage.researchMode,
               agentMode: agentEnabled === true,
               taskType: effectiveTaskType,
               autoRouted,
@@ -767,18 +645,22 @@ export function useChat(
         role: 'assistant',
         content: '',
         model,
-        researchMode: targetMessage.researchMode,
+        researchMode: false,
         agentMode: targetMessage.agentMode,
         taskType: targetMessage.taskType,
         autoRouted: targetMessage.autoRouted,
         routingNote: targetMessage.routingNote,
-        searchResults: targetMessage.searchResults,
-        researchTrace: targetMessage.researchTrace,
         documentExcerpts: targetMessage.documentExcerpts,
         timestamp: Date.now(),
       };
+      // A regenerated answer searches afresh: the model decides again.
+      const regenerateWebSearch = webSearchPolicy({
+        explicitResearchTask: !targetMessage.autoRouted &&
+          (targetMessage.taskType === 'research' || targetMessage.taskType === 'deep-research'),
+      });
 
       setMessages((prev) => [...prev.slice(0, msgIndex), placeholderMessage]);
+      const toolEvents = createToolEventHandlers(placeholderMessage, setMessages, setResearchStatus);
 
       const currentMessages = await storage.getMessages(targetConversationId);
       const apiMessages = buildApiMessages(
@@ -804,6 +686,7 @@ export function useChat(
           headers: {
             'Content-Type': 'application/json',
             ...(openrouterApiKey ? { 'x-openrouter-key': openrouterApiKey } : {}),
+            ...(tavilyApiKey ? { 'x-tavily-key': tavilyApiKey } : {}),
           },
           body: JSON.stringify({
             messages: apiMessages,
@@ -812,12 +695,12 @@ export function useChat(
               .filter((item) => item.isFree && item.id.endsWith(':free') && !isCoolingDown(item))
               .map((item) => item.id),
             systemPrompt: systemPrompt || undefined,
-            searchResults: targetMessage.searchResults,
             attachments: toWireAttachments(userMsg.attachments),
             documentExcerpts: targetMessage.documentExcerpts,
-            researchMode: targetMessage.researchMode === true,
+            researchMode: regenerateWebSearch === 'required',
             agentMode: targetMessage.agentMode === true,
             taskType: targetMessage.taskType,
+            webSearch: regenerateWebSearch,
           }),
           signal: runController.signal,
         });
@@ -835,8 +718,11 @@ export function useChat(
             },
             onDelta: (delta) => {
               if (delta.model) finalModel = delta.model;
+              toolEvents.onDelta();
               streamDisplay?.append(delta.content);
             },
+            onTool: toolEvents.onTool,
+            onSources: toolEvents.onSources,
             onFallback: (fb) => {
               if (fb.toModel) finalModel = fb.toModel;
               if (fb.rateLimitedModels?.length) {
@@ -910,13 +796,13 @@ export function useChat(
             role: 'assistant',
             content: fullContent,
             model: finalModel,
-            researchMode: targetMessage.researchMode,
+            researchMode: placeholderMessage.researchMode,
             agentMode: targetMessage.agentMode,
             taskType: targetMessage.taskType,
             autoRouted: targetMessage.autoRouted,
             routingNote: targetMessage.routingNote,
-            searchResults: targetMessage.searchResults,
-            researchTrace: targetMessage.researchTrace,
+            searchResults: placeholderMessage.searchResults,
+            researchTrace: placeholderMessage.researchTrace,
             documentExcerpts: targetMessage.documentExcerpts,
             status: streamResult.status,
             finishReason: streamResult.finishReason,
@@ -993,7 +879,7 @@ export function useChat(
         }
       }
     },
-    [conversationId, messages, model, systemPrompt, openrouterApiKey, models, onModelsRateLimited, onModelOutcome]
+    [conversationId, messages, model, systemPrompt, openrouterApiKey, tavilyApiKey, models, onModelsRateLimited, onModelOutcome]
   );
 
   const removeMessage = useCallback(
@@ -1038,34 +924,87 @@ export function useChat(
   };
 }
 
-function buildResearchTrace(searchResults: SearchResponse | null): ResearchTrace | undefined {
-  if (!searchResults) return undefined;
+/**
+ * Search policy for one answer. By default the model decides whether to search
+ * ('auto'); the search toggles or an explicitly chosen research task require it.
+ */
+export function webSearchPolicy({
+  searchEnabled,
+  researchEnabled,
+  explicitResearchTask,
+}: {
+  searchEnabled?: boolean;
+  researchEnabled?: boolean;
+  explicitResearchTask?: boolean;
+}): WebSearchPolicy {
+  return searchEnabled || researchEnabled || explicitResearchTask ? 'required' : 'auto';
+}
+
+/**
+ * Live updates while the model uses its web tools: a status line naming the
+ * current search or page, and the numbered sources attached to the answer as
+ * they arrive (the same numbers the model cites).
+ */
+function createToolEventHandlers(
+  placeholder: Message,
+  setMessages: Dispatch<SetStateAction<Message[]>>,
+  setResearchStatus: Dispatch<SetStateAction<ResearchStatus | null>>
+) {
+  let statusShown = false;
   return {
-    query: searchResults.query,
-    plannedQueries: searchResults.plannedQueries,
-    plannedEntities: searchResults.plannedEntities,
-    planner: searchResults.planner,
-    provider: searchResults.provider,
-    providers: searchResults.providers,
-    providerErrors: searchResults.providerErrors,
-    sourceCount: searchResults.results?.length || 0,
-    openedCount: searchResults.results?.filter((result) => result.extracted).length || 0,
+    onTool(event: Extract<StreamingChatEvent, { type: 'tool' }>) {
+      if (event.status !== 'running') return;
+      statusShown = true;
+      if (event.name === 'web_search') {
+        setResearchStatus({
+          phase: 'searching',
+          mode: 'search',
+          label: `Searching ${event.kind === 'news' ? 'the news' : 'the web'} for "${event.query || ''}"`,
+        });
+      } else {
+        setResearchStatus({ phase: 'reading', mode: 'search', label: `Reading ${hostLabel(event.url)}` });
+      }
+    },
+    onSources(event: Extract<StreamingChatEvent, { type: 'sources' }>) {
+      const now = Date.now();
+      placeholder.searchResults = event.sources.map((source, index) => ({
+        ...source,
+        id: source.id || `src_${index + 1}`,
+        canonicalUrl: source.canonicalUrl || source.url,
+        fetchedAt: source.fetchedAt || now,
+      }));
+      placeholder.researchMode = true;
+      placeholder.researchTrace = {
+        query: event.queries[0] || '',
+        plannedQueries: event.queries,
+        planner: 'model',
+        provider: event.providers[0],
+        providers: event.providers,
+        sourceCount: event.sources.length,
+        openedCount: event.sources.filter((source) => source.extracted).length,
+      };
+      const update = {
+        searchResults: placeholder.searchResults,
+        researchMode: true,
+        researchTrace: placeholder.researchTrace,
+      };
+      setMessages((prev) => prev.map((message) => (message.id === placeholder.id ? { ...message, ...update } : message)));
+    },
+    onDelta() {
+      if (statusShown) {
+        statusShown = false;
+        setResearchStatus(null);
+      }
+    },
   };
 }
 
-function researchStatusLabel(phase: ResearchStatus['phase'], mode: ResearchStatus['mode']): string {
-  const depth = mode === 'deep-research' ? 'deep research' : mode === 'research' ? 'research' : 'web search';
-  switch (phase) {
-    case 'planning':
-      return `Planning ${depth} queries`;
-    case 'searching':
-      return `Searching the web`;
-    case 'reading':
-      return `Opening sources`;
-    case 'synthesizing':
-      return `Preparing answer from sources`;
-    default:
-      return `Working`;
+function hostLabel(url?: string): string {
+  if (!url) return 'a page';
+  try {
+    return new URL(url).hostname.replace(/^www[.]/, '');
+  } catch {
+    return 'a page';
   }
 }
 

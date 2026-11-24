@@ -34,7 +34,7 @@ export default function SecurityPage() {
             <ShieldCheck className="h-5 w-5" />
             <h2 className="mt-4 text-lg font-semibold">Outbound request boundaries</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">
-              Web research and page extraction enforce strict destination policies: loopback addresses, private networks, cloud metadata endpoints (e.g. 169.254.169.254), internal hostnames, and non-standard schemes are blocked across all network hops and redirects.
+              Web research and page extraction enforce strict destination policies: loopback addresses, private networks, cloud metadata endpoints (e.g. 169.254.169.254), internal hostnames, and non-standard schemes are blocked across all network hops and redirects. Each page connection is pinned to the address that passed this check, so a DNS answer cannot redirect it, and the model can only open pages that its own searches returned.
             </p>
           </section>
 

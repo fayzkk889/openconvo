@@ -3,14 +3,15 @@ import { streamChat, generateTitle, ChatMessage, OpenRouterError, formatOpenRout
 import { FALLBACK_CHAIN, isFreeModelId, getModelById, selectCandidateModels } from '@/lib/models';
 import { buildSystemPrompt } from '@/lib/prompts';
 import { SearchResult } from '@/types/search';
-import { Attachment, TaskType, StreamingChatEvent, TokenUsage } from '@/types/chat';
+import { Attachment, TaskType, StreamingChatEvent, TokenUsage, WebSearchPolicy } from '@/types/chat';
 import { DocumentExcerpt } from '@/types/document';
 import { normalizeTaskType } from '@/lib/tasks';
 import { buildResearchFallbackAnswer } from '@/lib/research-fallback';
-import { ensureResearchCitations, buildSourcesAppendixIfMissing } from '@/lib/research-citations';
+import { buildSourcesAppendixIfMissing } from '@/lib/research-citations';
 import { buildDocumentAppendixIfMissing } from '@/lib/document-citations';
 import { selectBoundedContext } from '@/lib/context-usage';
-import { SseChunkParser, parseOpenRouterPayload } from '@/lib/sse-parser';
+import { SseChunkParser, parseOpenRouterPayload, ToolCallAccumulator } from '@/lib/sse-parser';
+import { ToolSession, webTools } from '@/lib/web-tools';
 import { getUsageIdentity } from '@/lib/request-identity';
 import { hostedOpenRouterKey } from '@/lib/hosted-mode';
 import { reserveQuota, releaseQuota, quotaRefusalMessage, QuotaReservation } from '@/lib/hosted-quota';
@@ -28,6 +29,9 @@ const REQUEST_ABSOLUTE_DEADLINE_MS = 52 * 1000;
 const MAX_MODEL_ATTEMPTS = 3;
 const ATTEMPT_CONNECT_TIMEOUT_MS = 10 * 1000;
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 15 * 1000;
+// A tool round is offered only while enough time is left to search and answer.
+const TOOL_ROUND_MIN_REMAINING_MS = 18 * 1000;
+const MAX_TOOL_CALLS_PER_ROUND = 3;
 
 const modelCooldowns = new Map<string, number>();
 type UsageMode = 'byok' | 'hosted-free';
@@ -77,6 +81,7 @@ export async function POST(request: NextRequest) {
       taskType,
       generateTitleFor,
       availableModels,
+      webSearch,
     } = body;
 
     if (!hasOpenRouterKey(key)) {
@@ -138,6 +143,11 @@ export async function POST(request: NextRequest) {
     const requestId = 'req_' + Math.random().toString(36).slice(2, 10);
     const encoder = new TextEncoder();
     const overallDeadline = Date.now() + REQUEST_ABSOLUTE_DEADLINE_MS;
+    const isHosted = hostedQuota.mode === 'hosted-free';
+    const deep = taskType === 'deep-research';
+    // Each tool round is one more OpenRouter request, so hosted visitors (who
+    // share one key) get a single search round.
+    const maxToolRounds = webSearch === 'off' ? 0 : isHosted ? 1 : deep ? 4 : 3;
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -166,11 +176,40 @@ export async function POST(request: NextRequest) {
           }
         };
 
+        const tools = new ToolSession({
+          clientTavilyKey: getClientTavilyKey(request),
+          signal: request.signal,
+          maxSearches: isHosted ? 2 : deep ? 8 : 4,
+          maxPageReads: isHosted ? 1 : deep ? 5 : 3,
+          beforeSearch: isHosted ? () => reserveHostedSearch(hostedQuota) : undefined,
+          onActivity: (activity) => emitEvent(
+            activity.name === 'web_search'
+              ? { type: 'tool', name: 'web_search', status: activity.status, query: activity.query, kind: activity.kind, resultCount: activity.resultCount }
+              : { type: 'tool', name: 'read_page', status: activity.status, url: activity.url }
+          ),
+        });
+        const emitSources = () => emitEvent({
+          type: 'sources',
+          sources: tools.sources.map((source) => ({
+            ...source,
+            snippet: source.snippet.slice(0, 500),
+            content: source.content?.slice(0, 1500),
+          })),
+          queries: [...tools.queries],
+          providers: Array.from(tools.providers),
+        });
+        // Tool calls and their results, carried over if a model fails mid-way so
+        // the next model continues from the same evidence.
+        const toolTranscript: ChatMessage[] = [];
+        let toolRoundsUsed = 0;
+        let metaSent = false;
+        let emittedContent = '';
+
         let lastError: Error | null = null;
         let usedModel = model;
         const failedModels: string[] = [];
         const rateLimitedModels: string[] = [];
-        const providerRateLimits = new Map<string, number>();
+        const rateLimitedFamilies = new Set<string>();
         let retryAfterSeconds: number | undefined;
         let attemptsCount = 0;
 
@@ -189,7 +228,7 @@ export async function POST(request: NextRequest) {
             break;
           }
 
-          if (isModelCoolingDown(tryModel)) {
+          if (isModelCoolingDown(tryModel) || rateLimitedFamilies.has(modelFamily(tryModel))) {
             continue;
           }
 
@@ -205,156 +244,181 @@ export async function POST(request: NextRequest) {
             MAX_MESSAGE_CHARS,
             candidateContextLimit
           );
+          let toolsSupported = true;
 
           try {
-            const fullSystemPrompt = buildSystemPrompt({
-              customPrompt: systemPrompt,
-              activeModel: tryModel,
-              researchMode,
-              agentMode,
-              taskType,
-              searchResults,
-              attachments,
-              documentExcerpts,
-            });
+            // One model attempt: rounds of (stream → run any tool calls) until
+            // the model answers without calling a tool.
+            while (true) {
+              const offerTools =
+                toolsSupported &&
+                toolRoundsUsed < maxToolRounds &&
+                overallDeadline - Date.now() > TOOL_ROUND_MIN_REMAINING_MS;
+              // Without tools, gathered sources go into the system prompt so any
+              // model (with or without tool support) can answer from them.
+              const evidence = tools.sources.length ? tools.sources : searchResults;
+              const fullSystemPrompt = buildSystemPrompt({
+                customPrompt: systemPrompt,
+                activeModel: tryModel,
+                researchMode: researchMode || (!offerTools && tools.sources.length > 0),
+                agentMode,
+                taskType,
+                searchResults: offerTools ? searchResults : evidence,
+                attachments,
+                documentExcerpts,
+                webTools: offerTools ? { policy: webSearch, canReadPages: webTools().length > 1, roundsLeft: maxToolRounds - toolRoundsUsed } : undefined,
+                webUnavailable: webSearch !== 'off' && !offerTools && !evidence?.length,
+              });
+              const roundMessages = offerTools ? [...candidateMessages, ...toolTranscript] : candidateMessages;
+              const connectTimeoutMs = Math.min(ATTEMPT_CONNECT_TIMEOUT_MS, Math.max(overallDeadline - Date.now(), 1000));
 
-            const connectTimeoutMs = Math.min(ATTEMPT_CONNECT_TIMEOUT_MS, remainingDeadlineMs);
-
-            // Step 9: Pass downstream client cancellation signal
-            const response = await streamChat(
-              candidateMessages,
-              tryModel,
-              fullSystemPrompt,
-              key,
-              request.signal,
-              connectTimeoutMs
-            );
-
-            if (!response.body) {
-              throw new Error('No response body from OpenRouter');
-            }
-
-            // Connection succeeded: emit meta event
-            emitEvent({
-              type: 'meta',
-              requestId,
-              model: usedModel,
-              mode: hostedQuota.mode,
-            });
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            const sseParser = new SseChunkParser();
-            let emittedContent = '';
-            let finishReason: string | undefined;
-            let usage: TokenUsage | undefined;
-            let streamSuccess = false;
-
-            try {
-              while (true) {
-                // Check overall deadline budget
-                const chunkBudgetMs = Math.min(
-                  CHAT_STREAM_IDLE_TIMEOUT_MS,
-                  Math.max(overallDeadline - Date.now(), 1000)
+              let response: Response;
+              try {
+                response = await streamChat(
+                  roundMessages,
+                  tryModel,
+                  fullSystemPrompt,
+                  key,
+                  request.signal,
+                  connectTimeoutMs,
+                  offerTools ? webTools() : undefined
                 );
-
-                const { done, value } = await readStreamChunkWithTimeout(
-                  reader,
-                  chunkBudgetMs,
-                  request.signal
-                );
-                if (done) break;
-
-                const textChunk = decoder.decode(value, { stream: true });
-                const events = sseParser.feed(textChunk);
-
-                for (const rawPayload of events) {
-                  const parsed = parseOpenRouterPayload(rawPayload);
-                  if (!parsed) continue;
-
-                  if (parsed.isDone) {
-                    streamSuccess = true;
-                    break;
-                  }
-
-                  if (parsed.finishReason) {
-                    finishReason = parsed.finishReason;
-                  }
-                  if (parsed.usage) {
-                    usage = parsed.usage;
-                  }
-
-                  if (parsed.content) {
-                    emittedContent += parsed.content;
-                    emitEvent({
-                      type: 'delta',
-                      content: parsed.content,
-                      model: usedModel,
-                    });
-                  }
+              } catch (error) {
+                // Some free endpoints reject tool definitions: retry the same model
+                // without tools, answering from whatever evidence exists.
+                if (offerTools && isToolUnsupportedError(error)) {
+                  toolsSupported = false;
+                  continue;
                 }
-
-                if (streamSuccess) break;
+                throw error;
               }
 
-              // Flush parser remainder
-              const flushed = sseParser.flush();
-              for (const rawPayload of flushed) {
+              if (!response.body) {
+                throw new Error('No response body from OpenRouter');
+              }
+
+              if (!metaSent) {
+                metaSent = true;
+                emitEvent({
+                  type: 'meta',
+                  requestId,
+                  model: usedModel,
+                  mode: hostedQuota.mode,
+                });
+              }
+
+              const reader = response.body.getReader();
+              const decoder = new TextDecoder();
+              const sseParser = new SseChunkParser();
+              const toolCalls = new ToolCallAccumulator();
+              let roundContent = '';
+              let finishReason: string | undefined;
+              let usage: TokenUsage | undefined;
+              let streamSuccess = false;
+
+              const handlePayload = (rawPayload: string) => {
                 const parsed = parseOpenRouterPayload(rawPayload);
-                if (parsed?.content) {
-                  emittedContent += parsed.content;
-                  emitEvent({
-                    type: 'delta',
-                    content: parsed.content,
-                    model: usedModel,
-                  });
+                if (!parsed) return;
+                if (parsed.isDone) {
+                  streamSuccess = true;
+                  return;
                 }
-                if (parsed?.finishReason) {
-                  finishReason = parsed.finishReason;
+                if (parsed.finishReason) finishReason = parsed.finishReason;
+                if (parsed.usage) usage = parsed.usage;
+                if (parsed.toolCalls) toolCalls.add(parsed.toolCalls);
+                if (parsed.content) {
+                  roundContent += parsed.content;
+                  emittedContent += parsed.content;
+                  emitEvent({ type: 'delta', content: parsed.content, model: usedModel });
+                }
+              };
+
+              try {
+                while (true) {
+                  const chunkBudgetMs = Math.min(
+                    CHAT_STREAM_IDLE_TIMEOUT_MS,
+                    Math.max(overallDeadline - Date.now(), 1000)
+                  );
+                  const { done, value } = await readStreamChunkWithTimeout(reader, chunkBudgetMs, request.signal);
+                  if (done) break;
+                  for (const rawPayload of sseParser.feed(decoder.decode(value, { stream: true }))) {
+                    handlePayload(rawPayload);
+                    if (streamSuccess) break;
+                  }
+                  if (streamSuccess) break;
+                }
+                for (const rawPayload of sseParser.flush()) handlePayload(rawPayload);
+              } catch (streamError) {
+                await reader.cancel().catch(() => undefined);
+                // Content already reached the user: never switch models mid-answer.
+                if (emittedContent.trim().length > 0) {
+                  const errMessage = (streamError as Error).message || 'Stream interrupted';
+                  if (emittedContent.trim().length >= 20) commitQuotaOnce();
+                  emitEvent({
+                    type: 'interrupted',
+                    model: usedModel,
+                    partialContent: emittedContent,
+                    reason: errMessage,
+                    finishReason: 'interrupted',
+                  });
+                  controller.close();
+                  return;
+                }
+                throw streamError;
+              } finally {
+                try {
+                  reader.releaseLock();
+                } catch {
+                  // Ignore lock release error
                 }
               }
 
-              // Post-processing for research citations
-              if (emittedContent.trim() && researchMode && searchResults?.length) {
-                const citationTail = buildSourcesAppendixIfMissing(emittedContent, searchResults);
+              // The model asked for tools: run them and go round again.
+              if (offerTools && toolCalls.size > 0) {
+                toolRoundsUsed++;
+                const calls = toolCalls.toToolCalls().slice(0, MAX_TOOL_CALLS_PER_ROUND);
+                toolTranscript.push({ role: 'assistant', content: roundContent || null, tool_calls: calls });
+                // Text written before a tool call is narration ("I'll look that
+                // up"), not part of the answer: withdraw it from the stream.
+                if (emittedContent) {
+                  emittedContent = '';
+                  emitEvent({ type: 'reset' });
+                }
+                for (const call of calls) {
+                  const result = await tools.execute(call);
+                  toolTranscript.push({ role: 'tool', tool_call_id: call.id, content: result });
+                }
+                if (tools.sources.length) emitSources();
+                continue;
+              }
+
+              // Final answer for this request.
+              const citedSources = tools.sources.length ? tools.sources : (researchMode ? searchResults : undefined);
+              if (emittedContent.trim() && citedSources?.length) {
+                const citationTail = buildSourcesAppendixIfMissing(emittedContent, citedSources);
                 if (citationTail) {
                   emittedContent += citationTail;
-                  emitEvent({
-                    type: 'delta',
-                    content: citationTail,
-                    model: usedModel,
-                  });
+                  emitEvent({ type: 'delta', content: citationTail, model: usedModel });
                 }
               }
 
-              // Post-processing for document sources
               if (emittedContent.trim() && documentExcerpts?.length) {
                 const docAppendix = buildDocumentAppendixIfMissing(emittedContent, documentExcerpts);
                 if (docAppendix) {
                   emittedContent += docAppendix;
-                  emitEvent({
-                    type: 'delta',
-                    content: docAppendix,
-                    model: usedModel,
-                  });
+                  emitEvent({ type: 'delta', content: docAppendix, model: usedModel });
                 }
               }
 
-              // Check if response was empty
               if (!emittedContent.trim()) {
                 throw new Error('Model returned an empty response');
               }
 
-              // Terminal completion verification:
-              // Upstream stream must have explicitly confirmed completion via [DONE] / isDone,
-              // or emitted a known terminal finish_reason (e.g., 'stop', 'length', 'end_turn').
-              // If the connection dropped prematurely without confirmation:
+              // The upstream stream must confirm completion ([DONE] or a known
+              // finish_reason); otherwise the answer may be cut short.
               const isConfirmedTerminal = streamSuccess || (Boolean(finishReason) && finishReason !== 'unknown');
-
               if (!isConfirmedTerminal) {
-                if (emittedContent.trim().length >= 20) {
-                  commitQuotaOnce();
-                }
+                if (emittedContent.trim().length >= 20) commitQuotaOnce();
                 emitEvent({
                   type: 'interrupted',
                   model: usedModel,
@@ -366,7 +430,6 @@ export async function POST(request: NextRequest) {
                 return;
               }
 
-              // Verified completion!
               commitQuotaOnce();
               emitEvent({
                 type: 'complete',
@@ -374,38 +437,8 @@ export async function POST(request: NextRequest) {
                 finishReason: finishReason || 'stop',
                 usage,
               });
-
               controller.close();
               return;
-            } catch (streamError) {
-              await reader.cancel().catch(() => undefined);
-
-              // Step 4 Invariant: Mid-stream failure enforcement
-              // If content has already been emitted, DO NOT fall back to another model!
-              if (emittedContent.trim().length > 0) {
-                const errMessage = (streamError as Error).message || 'Stream interrupted';
-                if (emittedContent.trim().length >= 20) {
-                  commitQuotaOnce();
-                }
-                emitEvent({
-                  type: 'interrupted',
-                  model: usedModel,
-                  partialContent: emittedContent,
-                  reason: errMessage,
-                  finishReason: 'interrupted',
-                });
-                controller.close();
-                return;
-              }
-
-              // If stream failed BEFORE emitting content, rethrow to trigger model fallback
-              throw streamError;
-            } finally {
-              try {
-                reader.releaseLock();
-              } catch {
-                // Ignore lock release error
-              }
             }
           } catch (modelError) {
             lastError = modelError as Error;
@@ -418,11 +451,10 @@ export async function POST(request: NextRequest) {
               rateLimitedModels.push(tryModel);
               retryAfterSeconds = modelError.retryAfterSeconds || retryAfterSeconds;
               rememberModelCooldown(tryModel, modelError);
-              if (modelError.providerName) {
-                const hits = (providerRateLimits.get(modelError.providerName) || 0) + 1;
-                providerRateLimits.set(modelError.providerName, hits);
-                if (hits >= 2) break; // Don't pound the same provider
-              }
+              // Sibling models from the same family are usually served by the
+              // same throttled provider (e.g. both Gemmas via Google AI Studio):
+              // skip them and spend the next attempt on a different family.
+              rateLimitedFamilies.add(modelFamily(tryModel));
             } else if (modelError instanceof OpenRouterError && isOpenRouterAuthError(modelError)) {
               break; // Auth error won't be resolved by fallback
             }
@@ -430,7 +462,7 @@ export async function POST(request: NextRequest) {
             // If another candidate exists within deadline and attempt budget, notify client of fallback
             const nextCandidate = modelsToTry
               .slice(i + 1)
-              .find((m) => !isModelCoolingDown(m));
+              .find((m) => !isModelCoolingDown(m) && !rateLimitedFamilies.has(modelFamily(m)));
             if (nextCandidate && attemptsCount < MAX_MODEL_ATTEMPTS && overallDeadline - Date.now() > 5000) {
               const sanitizedReason = modelError instanceof OpenRouterError
                 ? formatOpenRouterError(modelError, tryModel)
@@ -452,11 +484,12 @@ export async function POST(request: NextRequest) {
           ? formatOpenRouterError(lastError)
           : (lastError?.message || 'Inference failed across candidate models');
 
-        if (researchMode && searchResults?.length) {
+        const fallbackSources = tools.sources.length ? tools.sources : (researchMode ? searchResults : undefined);
+        if (fallbackSources?.length && !request.signal.aborted) {
           commitQuotaOnce();
           const fallbackAnswer = buildResearchFallbackAnswer({
             question: lastUserQuestion(rawMessages),
-            sources: searchResults,
+            sources: fallbackSources,
             reason: cleanLastErrorMsg || 'the selected free model did not stream a response in time',
           });
           emitEvent({
@@ -599,6 +632,35 @@ function isOpenRouterAuthError(error: OpenRouterError): boolean {
   return error.status === 401 || error.status === 403;
 }
 
+function getClientTavilyKey(request: NextRequest): string | null {
+  const key = request.headers.get('x-tavily-key')?.trim();
+  return key || null;
+}
+
+/** OpenRouter answers 404 "No endpoints found that support tool use" (or a 400) for such models. */
+function isToolUnsupportedError(error: unknown): boolean {
+  if (!(error instanceof OpenRouterError)) return false;
+  if (![400, 404, 422].includes(error.status)) return false;
+  return /tool/i.test(`${error.providerMessage || ''} ${error.body || ''}`);
+}
+
+/** In hosted mode each web search spends one slot of the visitor's search quota. */
+async function reserveHostedSearch(quota: HostedQuota): Promise<{ allowed: boolean; message?: string }> {
+  if (quota.mode !== 'hosted-free' || !quota.identity) return { allowed: true };
+  const reservation = await reserveQuota('search', quota.identity, {
+    perIdentity: positiveIntEnv('OPENCONVO_HOSTED_SEARCH_DAILY_LIMIT', 15),
+    global: positiveIntEnv('OPENCONVO_HOSTED_SEARCH_GLOBAL_DAILY_LIMIT', 20),
+  });
+  return reservation.allowed
+    ? { allowed: true }
+    : { allowed: false, message: quotaRefusalMessage(reservation, 'search') };
+}
+
+function positiveIntEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name] || fallback);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
 function getClientOpenRouterKey(request: NextRequest): string | null {
   const key = request.headers.get('x-openrouter-key')?.trim();
   return key || null;
@@ -698,6 +760,7 @@ function validateChatBody(body: unknown): {
   taskType?: TaskType;
   generateTitleFor?: boolean;
   availableModels: string[];
+  webSearch: WebSearchPolicy;
 } {
   if (!body || typeof body !== 'object') {
     throw new Error('Invalid request body');
@@ -729,6 +792,7 @@ function validateChatBody(body: unknown): {
     taskType: normalizeTaskType(candidate.taskType),
     generateTitleFor: candidate.generateTitleFor === true,
     availableModels: normalizeAvailableModels(candidate.availableModels),
+    webSearch: candidate.webSearch === 'off' || candidate.webSearch === 'required' ? candidate.webSearch : 'auto',
   };
 }
 
@@ -829,4 +893,9 @@ function normalizeDocumentExcerpts(value: unknown): DocumentExcerpt[] | undefine
     ];
   });
   return excerpts.length > 0 ? excerpts : undefined;
+}
+
+/** "google/gemma-4-31b-it:free" -> "google". */
+function modelFamily(modelId: string): string {
+  return modelId.split('/')[0] || modelId;
 }

@@ -121,7 +121,29 @@ export type StreamingChatEvent =
       content: string;
       model: string;
       reason: string;
+    }
+  | {
+      type: 'tool';
+      name: 'web_search' | 'read_page';
+      status: 'running' | 'done' | 'failed';
+      query?: string;
+      kind?: 'web' | 'news';
+      url?: string;
+      resultCount?: number;
+    }
+  | {
+      /** Withdraw the text streamed so far (pre-tool narration). */
+      type: 'reset';
+    }
+  | {
+      type: 'sources';
+      sources: SearchResultRef[];
+      queries: string[];
+      providers: string[];
     };
+
+/** How much the model may use web tools for one answer. */
+export type WebSearchPolicy = 'auto' | 'required' | 'off';
 
 export interface Message {
   id: string;

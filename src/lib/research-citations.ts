@@ -74,11 +74,15 @@ export function ensureResearchCitations(content: string, sources?: CitationSourc
   return `${cleanedContent}\n\n${buildSourcesSection(usefulSources, cleanedContent)}`;
 }
 
+const MAX_NUMBERED_SOURCES = 30;
+
 export function buildSourcesAppendixIfMissing(content: string, sources?: CitationSource[]): string | null {
   if (!content || !content.trim()) return null;
+  // Keep original numbering: model-driven search can return more than 8
+  // sources and the answer may cite any of them.
   const usefulSources = (sources || [])
-    .filter((source) => source && source.title && source.url)
-    .slice(0, 8);
+    .slice(0, MAX_NUMBERED_SOURCES)
+    .filter((source) => source && source.title && source.url);
   if (usefulSources.length === 0) return null;
 
   // If content already contains a sources section, do not append a duplicate
@@ -90,7 +94,7 @@ export function buildSourcesAppendixIfMissing(content: string, sources?: Citatio
 }
 
 export function buildSourcesSection(sources: CitationSource[], content?: string): string {
-  const usefulSources = sources.slice(0, 8);
+  const usefulSources = sources.slice(0, content ? MAX_NUMBERED_SOURCES : 8);
   if (content) {
     const validation = validateCitationReferences(content, usefulSources);
     const citedSet = new Set(validation.validIndices);
@@ -108,9 +112,15 @@ export function buildSourcesSection(sources: CitationSource[], content?: string)
       }
     });
 
-    if (cited.length > 0 && uncited.length > 0) {
-      return `**Cited Sources**\n${cited.join('\n')}\n\n**Additional Retrieved Sources**\n${uncited.join('\n')}`;
+    // Every cited source is listed; uncited ones only fill up to 8 lines.
+    const extra = uncited.slice(0, Math.max(0, 8 - cited.length));
+    if (cited.length > 0 && extra.length > 0) {
+      return `**Cited Sources**\n${cited.join('\n')}\n\n**Additional Retrieved Sources**\n${extra.join('\n')}`;
     }
+    if (cited.length > 0) {
+      return `**Sources**\n${cited.join('\n')}`;
+    }
+    return ['**Sources**', ...uncited.slice(0, 8)].join('\n');
   }
 
   const lines = ['**Sources**'];

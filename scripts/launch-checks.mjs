@@ -95,8 +95,8 @@ check('research initial search uses focused heuristic query', /bestInitialSearch
 check('model planner cannot erase deterministic fallback queries', /fallbackPlan/.test(searchRoute) && /dedupeSearchQueries/.test(searchRoute) && /\.\.\.\(options\.fallbackPlan\?\.queries/.test(searchRoute));
 check('auto mode has broad web research triggers', /needsWebResearch/.test(tasks) && /latest\|current/.test(tasks) && /looksLikeExternalDecision/.test(tasks));
 check('auto mode keeps casual greetings out of research', /isCasualGreeting/.test(tasks) && /return 'quick'/.test(tasks));
-check('auto mode strips leading greetings before routing/search', /stripLeadingGreeting/.test(tasks) && /stripLeadingGreeting\(content\)/.test(useChat) && /stripLeadingGreeting\(query\)/.test(searchRoute));
-check('hidden search toggles do not force auto research', !/researchEnabled \|\| searchEnabled\) return 'research'/.test(tasks) && /const shouldUseSearch = !isQuickTask && isResearchTask/.test(useChat));
+check('the client no longer pre-searches; the model decides through tools', !useChat.includes("'/api/search'") && /webSearch,/.test(useChat) && /webTools\(\)/.test(chatRoute));
+check('hidden search toggles do not force auto research', !/researchEnabled \|\| searchEnabled\) return 'research'/.test(tasks) && /explicitResearchTask = !autoRouted/.test(useChat));
 check('auto mode routes social trends to research', /trending\|trends\|viral/.test(tasks) && /twitter\|x\\\.com\|reddit/.test(tasks));
 check('auto mode routes budget and spec lists to research', /budget\|under\|below\|within/.test(tasks) && /cc\|bhp\|nm\|kmpl/.test(tasks) && /give me the list/.test(tasks));
 check('research planner uses generic query analysis', /analyzeResearchQuery/.test(researchPlanner) && /inferResearchIntent/.test(researchPlanner) && /extractCandidateSubjects/.test(researchPlanner));
@@ -116,7 +116,7 @@ check('research planner derives market scope from currency', /extractMarketScope
 check('research planner handles live events generically', /liveEvent/.test(researchPlanner) && /extractNamedSubjects/.test(researchPlanner) && /official schedule fixtures results/.test(researchPlanner));
 check('research planner handles social trends generically', /socialTrend/.test(researchPlanner) && /trend tracker snapshot/.test(researchPlanner) && /trending hashtags topics/.test(researchPlanner));
 check('deep research mode expands query and source depth', /deep-research/.test(searchRoute) && /MAX_DEEP_PLANNED_QUERIES/.test(researchPlanner) && /maxCombinedResultsForMode/.test(searchLib));
-check('research trace is saved on messages', /researchTrace/.test(useChat) && /buildResearchTrace/.test(useChat));
+check('research trace is saved on messages', /researchTrace/.test(useChat) && /onSources/.test(useChat) && /planner: 'model'/.test(useChat));
 check('research trace renders in source panel', /Research trace/.test(messageComponent) && /plannedQueries/.test(messageComponent));
 check('research progress is visible before synthesis', /researchStatus/.test(useChat) && /ResearchProgress/.test(read('src/components/chat-area.tsx')));
 check('search results are quality ranked', /rankSearchResults/.test(searchLib) && /sourceScore/.test(sourceQuality));
@@ -147,10 +147,14 @@ check('research loading state explains source drafting', /Drafting from sources/
 check('message actions stay clickable while hovering', !/opacity-0 group-hover:opacity-100/.test(messageActions) && !/md:opacity-0/.test(messageComponent) && /relative z-10 mt-2 opacity-100/.test(messageComponent));
 check('markdown tables remain contained', /overflow-x: auto/.test(globals) && /vertical-align: top/.test(globals));
 check('chat stream stalls are bounded and recoverable', /CHAT_STREAM_IDLE_TIMEOUT_MS/.test(chatRoute) && /readStreamChunkWithTimeout/.test(chatRoute) && /did not stream a response in time/.test(chatRoute));
-check('client search and title requests have timeouts', /SEARCH_REQUEST_TIMEOUT_MS/.test(useChat) && /TITLE_REQUEST_TIMEOUT_MS/.test(useChat) && /fetchWithTimeout/.test(useChat));
+check('client title requests have timeouts', /TITLE_TIMEOUT_MS/.test(useChat) && /fetchWithTimeout/.test(useChat));
 check('research retries progressively shrink context', /RESEARCH_RETRY_SOURCE_LIMITS/.test(useChat) && /compactSearchResultsForAttempt/.test(useChat) && /MAX_SOURCE_CONTENT_CHARS/.test(prompts) && /MAX_SEARCH_CONTENT_CHARS/.test(chatRoute));
-check('quick tasks bypass external search', /isQuickTask/.test(useChat) && /const shouldUseSearch = !isQuickTask && isResearchTask/.test(useChat));
-check('casual greetings use a local reply without model search', /isCasualGreeting\(content\)/.test(useChat) && /Hey! How can I help\?/.test(useChat) && /return;/.test(useChat));
+check('searching is optional by default (tool_choice auto) and required only on request', /tool_choice: 'auto'/.test(openrouter) && /'required' : 'auto'/.test(useChat));
+check('no canned replies: greetings go to the model', !useChat.includes('Hey! How can I help?'));
+check('chat route runs a bounded tool loop and falls back without tools', chatRoute.includes('new ToolSession(') && chatRoute.includes('toolRoundsUsed < maxToolRounds') && chatRoute.includes('isToolUnsupportedError') && chatRoute.includes('isHosted ? 1'));
+check('read_page only opens URLs that a search returned', read('src/lib/web-tools.ts').includes('only accepts a URL from an earlier web_search result'));
+check('page fetches pin the socket to the checked address', webExtract.includes('lookup: safeLookup') && webExtract.includes('isBlockedHostname(entry.address)'));
+check('search results pass a relevance gate', searchLib.includes('isRelevantResult(result, cleanQuery)'));
 check('local conversation titles are summarized, not raw first prompts', /buildConversationTitle/.test(titleLib) && /buildComparisonTitle/.test(titleLib) && /buildPurchaseTitle/.test(titleLib) && /buildFeatureTitle/.test(titleLib) && /buildConversationTitle/.test(useChat) && /buildConversationTitle/.test(openrouter) && !/function buildLocalTitle/.test(useChat));
 check('research reports are extracted as artifacts', /extractResearchReportArtifact/.test(artifactsLib) && /Research Evidence/.test(artifactsLib));
 check('artifacts can be exported directly', /handleDownload/.test(read('src/components/artifact-panel.tsx')) && /artifactExtension/.test(read('src/components/artifact-panel.tsx')));
@@ -278,6 +282,16 @@ try {
 console.log('\nRunning RC-4 quota store and keyless search tests...\n');
 try {
   execFileSync(process.execPath, ['--loader', './scripts/loader.mjs', 'scripts/rc4-tests.mjs'], {
+    cwd: root,
+    stdio: 'inherit',
+  });
+} catch {
+  process.exit(1);
+}
+
+console.log('\nRunning RC-5 model-driven search tests...\n');
+try {
+  execFileSync(process.execPath, ['--loader', './scripts/loader.mjs', 'scripts/rc5-tests.mjs'], {
     cwd: root,
     stdio: 'inherit',
   });

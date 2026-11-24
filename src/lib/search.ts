@@ -958,6 +958,9 @@ function cleanText(value: string): string {
 
 function decodeHtml(value: string): string {
   return value
+    .replace(/&#x([0-9a-f]{1,6});/gi, (_, hex: string) => safeCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d{1,7});/g, (_, dec: string) => safeCodePoint(parseInt(dec, 10)))
+    .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
@@ -968,4 +971,233 @@ function decodeHtml(value: string): string {
     .replace(/&rdquo;|&#8221;/g, '"')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>');
+}
+
+// ---------------------------------------------------------------------------
+// Model-driven search: what the model's web_search tool calls.
+// ---------------------------------------------------------------------------
+
+export type ToolSearchKind = 'web' | 'news';
+
+const BING_NEWS_SEARCH = 'https://www.bing.com/news/search';
+const GOOGLE_NEWS_RSS = 'https://news.google.com/rss/search';
+const TOOL_SEARCH_TIMEOUT_MS = 6000;
+const TOOL_SEARCH_MAX_RESULTS = 6;
+
+/** Keyless news feed. Bing's links carry the publisher's own article URL. */
+const bingNewsProvider: SearchProvider = {
+  id: 'bing-news',
+  available: () => newsFeedsEnabled(),
+  async search(context, signal) {
+    const params = new URLSearchParams({ q: context.query, format: 'rss', setlang: 'en-US' });
+    const response = await fetch(`${BING_NEWS_SEARCH}?${params.toString()}`, {
+      signal,
+      headers: { 'Accept': 'application/rss+xml,text/xml', 'User-Agent': DEFAULT_USER_AGENT },
+    });
+    if (!response.ok) throw new Error(`Bing News error ${response.status}`);
+    return { provider: 'bing-news', results: parseRssFeed(await response.text(), 'bing') };
+  },
+};
+
+const googleNewsProvider: SearchProvider = {
+  id: 'google-news',
+  available: () => newsFeedsEnabled(),
+  async search(context, signal) {
+    const params = new URLSearchParams({ q: context.query, hl: 'en-US', gl: 'US', ceid: 'US:en' });
+    const response = await fetch(`${GOOGLE_NEWS_RSS}?${params.toString()}`, {
+      signal,
+      headers: { 'Accept': 'application/rss+xml,text/xml', 'User-Agent': DEFAULT_USER_AGENT },
+    });
+    if (!response.ok) throw new Error(`Google News error ${response.status}`);
+    return { provider: 'google-news', results: parseRssFeed(await response.text(), 'google') };
+  },
+};
+
+function newsFeedsEnabled(): boolean {
+  return process.env.OPENCONVO_NEWS_FEEDS !== 'off';
+}
+
+/**
+ * Parse a Bing News or Google News RSS feed. Bing wraps each link in a click
+ * tracker whose `url` parameter holds the article URL; Google titles end in
+ * " - Publisher".
+ */
+export function parseRssFeed(xml: string, flavour: 'bing' | 'google'): SearchResult[] {
+  const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+  return items.slice(0, 12).flatMap((item): SearchResult[] => {
+    const rawLink = decodeHtml(rssTag(item, 'link'));
+    let url = rawLink;
+    if (flavour === 'bing') {
+      try {
+        url = new URL(rawLink).searchParams.get('url') || rawLink;
+      } catch {
+        return [];
+      }
+    }
+    const safeUrl = normalizeHttpUrl(url);
+    if (!safeUrl) return [];
+    let title = cleanText(rssTag(item, 'title'));
+    const publisher = cleanText(rssTag(item, flavour === 'bing' ? 'News:Source' : 'source'));
+    if (flavour === 'google' && publisher && title.endsWith(` - ${publisher}`)) {
+      title = title.slice(0, -(publisher.length + 3));
+    }
+    const description = flavour === 'google' ? '' : cleanText(rssTag(item, 'description'));
+    const pubDate = rssTag(item, 'pubDate');
+    const published = pubDate && !Number.isNaN(Date.parse(pubDate))
+      ? new Date(pubDate).toISOString().slice(0, 10)
+      : undefined;
+    const snippet = [publisher ? `${publisher}.` : '', description].filter(Boolean).join(' ');
+    // Google News links are news.google.com redirects; show the publisher's
+    // own domain from <source url="..."> instead.
+    const sourceUrl = flavour === 'google' ? item.match(/<source[^>]*\burl="([^"]+)"/i)?.[1] : undefined;
+    let domain: string | undefined;
+    try {
+      domain = sourceUrl ? new URL(decodeHtml(sourceUrl)).hostname.replace(/^www[.]/, '') : undefined;
+    } catch {
+      domain = undefined;
+    }
+    return [{
+      title: title.slice(0, 200) || 'Untitled',
+      url: safeUrl,
+      snippet: snippet.slice(0, 300),
+      content: snippet.slice(0, 1000),
+      publishedAt: published,
+      domain,
+    }];
+  });
+}
+
+function rssTag(item: string, tag: string): string {
+  const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = item.match(new RegExp(`<${escaped}(?:\\s[^>]*)?>([\\s\\S]*?)</${escaped}>`, 'i'));
+  if (!match) return '';
+  return match[1].replace(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/, '$1').trim();
+}
+
+const RELEVANCE_STOPWORDS = new Set([
+  ...WIKIPEDIA_STOPWORDS,
+  'whats', 'news', 'today', 'recent', 'current', 'currently', 'rumour', 'rumours', 'rumor', 'rumors',
+  'report', 'reports', 'update', 'updates', 'official', 'there', 'any', 'some', 'like', 'will', 'has', 'have',
+]);
+
+function relevanceTerms(query: string): string[] {
+  return Array.from(new Set(
+    query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length >= 3 && !RELEVANCE_STOPWORDS.has(t))
+  ));
+}
+
+/**
+ * Drop results that share too little with the query. A term counts when a word
+ * of the result starts with its stem, so "layoff" matches "layoffs". Requires
+ * every term for one- or two-term queries, otherwise at least half of them.
+ */
+export function isRelevantResult(result: Pick<SearchResult, 'title' | 'snippet' | 'url'>, query: string): boolean {
+  const terms = relevanceTerms(query);
+  if (terms.length === 0) return true;
+  const haystack = `${result.title} ${result.snippet} ${safeDecodeUrl(result.url)}`.toLowerCase();
+  const words = haystack.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const matched = terms.filter((term) => {
+    const stem = term.length > 5 ? term.slice(0, term.length - 2) : term;
+    return words.some((word) => word.startsWith(stem));
+  }).length;
+  const needed = terms.length <= 2 ? terms.length : Math.ceil(terms.length / 2);
+  return matched >= needed;
+}
+
+function safeDecodeUrl(url: string): string {
+  try {
+    return decodeURIComponent(url);
+  } catch {
+    return url;
+  }
+}
+
+export type ToolSearchResponse = {
+  query: string;
+  kind: ToolSearchKind;
+  results: SearchResult[];
+  providers: string[];
+  providerErrors: string[];
+};
+
+/**
+ * Search for the model's web_search tool. Every available source for the kind
+ * is queried in parallel; results are merged, deduplicated, filtered for
+ * relevance and ranked. No key is needed; Tavily and SearxNG join in only when
+ * configured.
+ */
+export async function searchForTool(
+  query: string,
+  kind: ToolSearchKind,
+  options: { clientTavilyKey?: string | null; signal?: AbortSignal; maxResults?: number } = {}
+): Promise<ToolSearchResponse> {
+  const cleanQuery = query.replace(/\s+/g, ' ').trim().slice(0, 300);
+  const cacheKey = `tool:${kind}:${searchCacheKey(cleanQuery, options.clientTavilyKey, 'search')}`;
+  const cached = getCachedSearch(cacheKey);
+  if (cached) {
+    return {
+      query: cleanQuery,
+      kind,
+      results: cached.results,
+      providers: cached.providers || [],
+      providerErrors: cached.providerErrors || [],
+    };
+  }
+
+  const context: SearchProviderContext = { query: cleanQuery, mode: 'search', clientTavilyKey: options.clientTavilyKey };
+  const providers = (kind === 'news'
+    ? [bingNewsProvider, googleNewsProvider, tavilyProvider, searxngProvider]
+    : [tavilyProvider, searxngProvider, bingHtmlProvider, duckDuckGoProvider, wikipediaProvider]
+  ).filter((provider) => provider.available(context));
+
+  const settled = await Promise.all(providers.map(async (provider): Promise<SearchProviderResult | Error> => {
+    try {
+      return await withTimeout(
+        (signal) => provider.search(context, signal),
+        TOOL_SEARCH_TIMEOUT_MS,
+        `${provider.id} timed out`,
+        options.signal
+      );
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+      return new Error(`${provider.id}: ${error instanceof Error ? error.message : 'failed'}`);
+    }
+  }));
+
+  const providerErrors = settled.filter((item): item is Error => item instanceof Error).map((error) => error.message);
+  const successful = settled.filter((item): item is SearchProviderResult => !(item instanceof Error));
+  // Interleave providers so one source cannot crowd out the others.
+  const interleaved: SearchResult[] = [];
+  const maxLen = Math.max(0, ...successful.map((item) => item.results.length));
+  for (let i = 0; i < maxLen; i++) {
+    for (const item of successful) {
+      const result = item.results[i];
+      if (result) interleaved.push({ ...result, provider: item.provider });
+    }
+  }
+  const relevant = dedupeResults(interleaved).filter((result) => isRelevantResult(result, cleanQuery));
+  // News is newest first (undated items last, feed order otherwise); web results
+  // are ranked by source quality.
+  const ordered = kind === 'news'
+    ? relevant
+      .map((result, index) => ({ result, index, time: result.publishedAt ? Date.parse(result.publishedAt) : NaN }))
+      .sort((a, b) => {
+        const at = Number.isNaN(a.time) ? -Infinity : a.time;
+        const bt = Number.isNaN(b.time) ? -Infinity : b.time;
+        return bt - at || a.index - b.index;
+      })
+      .map(({ result }) => result)
+    : rankSearchResults(relevant, cleanQuery);
+  const results = ordered.slice(0, options.maxResults ?? TOOL_SEARCH_MAX_RESULTS);
+  const usedProviders = Array.from(new Set(results.map((result) => result.provider).filter((p): p is string => Boolean(p))));
+
+  if (results.length > 0) {
+    setCachedSearch(cacheKey, { query: cleanQuery, results, providers: usedProviders, providerErrors });
+  }
+  return { query: cleanQuery, kind, results, providers: usedProviders, providerErrors };
+}
+
+function safeCodePoint(code: number): string {
+  if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return ' ';
+  return String.fromCodePoint(code);
 }

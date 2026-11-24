@@ -154,8 +154,10 @@ function getHeaders(clientKey?: string | null): Record<string, string> {
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string | null;
+  tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
+  tool_call_id?: string;
 }
 
 export type GeneratedResearchPlan = {
@@ -169,7 +171,8 @@ export async function streamChat(
   systemPrompt?: string,
   apiKey?: string | null,
   signal?: AbortSignal,
-  timeoutMs = OPENROUTER_REQUEST_TIMEOUT_MS
+  timeoutMs = OPENROUTER_REQUEST_TIMEOUT_MS,
+  tools?: Array<Record<string, unknown>>
 ): Promise<Response> {
   const allMessages: ChatMessage[] = [];
   if (systemPrompt) {
@@ -183,6 +186,7 @@ export async function streamChat(
       messages: allMessages,
       stream: true,
       provider: FREE_ONLY_PROVIDER_OPTIONS,
+      ...(tools?.length ? { tools, tool_choice: 'auto' } : {}),
     },
     apiKey,
     timeoutMs,

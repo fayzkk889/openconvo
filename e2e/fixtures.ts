@@ -12,7 +12,14 @@ export type ChatScenario =
   | { kind: 'complete'; text: string }
   | { kind: 'slow'; chunks: string[]; delayMs: number }
   | { kind: 'interrupted'; text: string }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string }
+  | {
+      kind: 'tools';
+      query: string;
+      sources: Array<{ title: string; url: string; snippet: string; publishedAt?: string }>;
+      text: string;
+      searchDelayMs: number;
+    };
 
 declare global {
   interface Window {
@@ -62,6 +69,23 @@ function chatShim() {
         } else if (scenario.kind === 'interrupted') {
           send({ type: 'delta', content: scenario.text, model });
           send({ type: 'interrupted', model, partialContent: scenario.text, reason: 'stream ended without completion marker' });
+        } else if (scenario.kind === 'tools') {
+          // The server-side tool loop as the browser sees it: the model's search,
+          // then numbered sources, then the answer citing them.
+          send({ type: 'delta', content: "I'll look that up.", model });
+          send({ type: 'reset' });
+          send({ type: 'tool', name: 'web_search', status: 'running', query: scenario.query, kind: 'news' });
+          await new Promise((r) => setTimeout(r, scenario.searchDelayMs));
+          if (closed) return;
+          send({ type: 'tool', name: 'web_search', status: 'done', query: scenario.query, kind: 'news', resultCount: scenario.sources.length });
+          send({
+            type: 'sources',
+            sources: scenario.sources.map((s, i) => ({ ...s, id: `src_${i + 1}`, domain: new URL(s.url).hostname })),
+            queries: [scenario.query],
+            providers: ['bing-news'],
+          });
+          send({ type: 'delta', content: scenario.text, model });
+          send({ type: 'complete', model, finishReason: 'stop' });
         } else if (scenario.kind === 'slow') {
           for (const chunk of scenario.chunks) {
             await new Promise((r) => setTimeout(r, scenario.delayMs));

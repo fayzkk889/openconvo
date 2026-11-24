@@ -132,6 +132,10 @@ export type StreamingChatEvent =
       resultCount?: number;
     }
   | {
+      /** Withdraw the text streamed so far (pre-tool narration). */
+      type: 'reset';
+    }
+  | {
       type: 'sources';
       sources: SearchResultRef[];
       queries: string[];

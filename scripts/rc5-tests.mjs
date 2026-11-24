@@ -408,6 +408,22 @@ await test('System prompt: date from the server clock; tool guidance only when t
   assert.match(unavailable, /could not check live sources/);
 });
 
+await test('Narration before a tool call is withdrawn; Google News items show the publisher domain', async () => {
+  installUpstream((body, n) => n === 0
+    ? sse([frame({ choices: [{ delta: { content: "I'll look up the latest on that." }, finish_reason: null }] }),
+      ...toolCallFrames('web_search', { query: 'Google India layoffs news', kind: 'news' })])
+    : sse(contentFrames('Verdict: about 30 roles [1].')));
+  const events = await drain(await chatPOST(chatRequest({ messages: [{ role: 'user', content: 'layoff rumours?' }] })));
+  const resetAt = events.findIndex((e) => e.type === 'reset');
+  assert.ok(resetAt > 0, 'reset emitted');
+  assert.ok(resetAt < events.findIndex((e) => e.type === 'tool'), 'reset precedes the search');
+  const finalText = textOf(events.slice(resetAt + 1));
+  assert.match(finalText, /^Verdict: about 30 roles \[1\]\./);
+  assert.doesNotMatch(finalText, /look up/);
+  const google = events.find((e) => e.type === 'sources').sources.find((s) => s.url.includes('news.google.com'));
+  assert.equal(google.domain, 'daily.example.org');
+});
+
 // Runs last: it leaves Google models in the route's rate-limit cooldown.
 await test('A rate-limited model family is skipped: fallback goes to a different provider', async () => {
   installUpstream((body) => body.model.startsWith('google/')

@@ -1047,12 +1047,22 @@ export function parseRssFeed(xml: string, flavour: 'bing' | 'google'): SearchRes
       ? new Date(pubDate).toISOString().slice(0, 10)
       : undefined;
     const snippet = [publisher ? `${publisher}.` : '', description].filter(Boolean).join(' ');
+    // Google News links are news.google.com redirects; show the publisher's
+    // own domain from <source url="..."> instead.
+    const sourceUrl = flavour === 'google' ? item.match(/<source[^>]*\burl="([^"]+)"/i)?.[1] : undefined;
+    let domain: string | undefined;
+    try {
+      domain = sourceUrl ? new URL(decodeHtml(sourceUrl)).hostname.replace(/^www[.]/, '') : undefined;
+    } catch {
+      domain = undefined;
+    }
     return [{
       title: title.slice(0, 200) || 'Untitled',
       url: safeUrl,
       snippet: snippet.slice(0, 300),
       content: snippet.slice(0, 1000),
       publishedAt: published,
+      domain,
     }];
   });
 }

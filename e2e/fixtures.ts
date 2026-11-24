@@ -72,6 +72,8 @@ function chatShim() {
         } else if (scenario.kind === 'tools') {
           // The server-side tool loop as the browser sees it: the model's search,
           // then numbered sources, then the answer citing them.
+          send({ type: 'delta', content: "I'll look that up.", model });
+          send({ type: 'reset' });
           send({ type: 'tool', name: 'web_search', status: 'running', query: scenario.query, kind: 'news' });
           await new Promise((r) => setTimeout(r, scenario.searchDelayMs));
           if (closed) return;

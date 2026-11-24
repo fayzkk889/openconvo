@@ -322,7 +322,7 @@ export function Message({
                           )}
                         </div>
                         <span className="text-[10px] text-[var(--color-text-tertiary)] truncate">
-                          {getSourceDomain(source.url) || source.url}
+                          {source.domain || getSourceDomain(source.url) || source.url}
                         </span>
                         {source.extracted && (
                           <span className="mt-1 w-fit rounded-full border border-[var(--color-success)]/30 bg-[var(--color-success)]/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-success)]">
@@ -441,7 +441,7 @@ function SourcePills({ sources }: { sources: NonNullable<MessageType['searchResu
       </span>
       {visibleSources.map((source, index) => {
         const safeUrl = safeExternalUrl(source.url);
-        const domain = getSourceDomain(source.url) || 'source';
+        const domain = source.domain || getSourceDomain(source.url) || 'source';
         const content = (
           <>
             <span className="font-semibold text-[var(--color-text-primary)]">[{index + 1}]</span>

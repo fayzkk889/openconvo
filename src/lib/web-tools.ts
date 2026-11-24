@@ -189,7 +189,7 @@ export class ToolSession {
     const source: SearchResult = {
       ...clean,
       id: `src_${this.sources.length + 1}`,
-      domain: hostOf(result.url),
+      domain: result.domain || hostOf(result.url),
       fetchedAt: Date.now(),
     };
     this.sources.push(source);

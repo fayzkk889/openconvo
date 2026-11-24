@@ -22,6 +22,7 @@ test('the model searches on its own: live status, cited sources, saved after rel
   await expect(answer).toContainText('about 30 Cloud roles were cut');
   await expect(app.getByText('Searching the news for "Google India layoffs"')).toHaveCount(0);
   await expect(answer.getByRole('button', { name: 'Sources (1)' })).toBeVisible();
+  await expect(answer).not.toContainText("I'll look that up.");
 
   // The client asked the model to decide (no forced search, no pre-search).
   const [body] = await chatBodies(app);

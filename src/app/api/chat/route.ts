@@ -378,15 +378,17 @@ export async function POST(request: NextRequest) {
                 toolRoundsUsed++;
                 const calls = toolCalls.toToolCalls().slice(0, MAX_TOOL_CALLS_PER_ROUND);
                 toolTranscript.push({ role: 'assistant', content: roundContent || null, tool_calls: calls });
+                // Text written before a tool call is narration ("I'll look that
+                // up"), not part of the answer: withdraw it from the stream.
+                if (emittedContent) {
+                  emittedContent = '';
+                  emitEvent({ type: 'reset' });
+                }
                 for (const call of calls) {
                   const result = await tools.execute(call);
                   toolTranscript.push({ role: 'tool', tool_call_id: call.id, content: result });
                 }
                 if (tools.sources.length) emitSources();
-                if (roundContent.trim()) {
-                  emittedContent += '\n\n';
-                  emitEvent({ type: 'delta', content: '\n\n', model: usedModel });
-                }
                 continue;
               }
 

@@ -191,6 +191,7 @@ export interface StreamConsumerCallbacks {
   onError?: (error: Extract<StreamingChatEvent, { type: 'error' }>) => void;
   onResearchFallback?: (rf: Extract<StreamingChatEvent, { type: 'research_fallback' }>) => void;
   onTool?: (tool: Extract<StreamingChatEvent, { type: 'tool' }>) => void;
+  onReset?: () => void;
   onSources?: (sources: Extract<StreamingChatEvent, { type: 'sources' }>) => void;
 }
 
@@ -300,6 +301,11 @@ export async function consumeChatStream(
 
       case 'tool':
         callbacks?.onTool?.(event);
+        break;
+
+      case 'reset':
+        fullContent = '';
+        callbacks?.onReset?.();
         break;
 
       case 'sources':

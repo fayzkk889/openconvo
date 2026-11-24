@@ -29,6 +29,7 @@ const RESEARCH_RETRY_CONTENT_LIMITS = [1200, 700, 350];
 
 type StreamingDisplay = {
   append: (content: string) => void;
+  reset: () => void;
   finish: (finalContent: string) => Promise<void>;
   cancel: () => void;
   getDisplayedContent: () => string;
@@ -366,6 +367,7 @@ export function useChat(
                   streamDisplay?.append(delta.content);
                 },
                 onTool: toolEvents.onTool,
+                onReset: () => streamDisplay?.reset(),
                 onSources: toolEvents.onSources,
                 onFallback: (fb) => {
                   if (fb.toModel) finalModel = fb.toModel;
@@ -722,6 +724,7 @@ export function useChat(
               streamDisplay?.append(delta.content);
             },
             onTool: toolEvents.onTool,
+            onReset: () => streamDisplay?.reset(),
             onSources: toolEvents.onSources,
             onFallback: (fb) => {
               if (fb.toModel) finalModel = fb.toModel;
@@ -1201,6 +1204,15 @@ function createStreamingDisplay(
     append(content: string) {
       pending += content;
       if (!timer) flush();
+    },
+    reset() {
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+      displayed = '';
+      pending = '';
+      if (!cancelled) render();
     },
     async finish(finalContent: string) {
       const deadline = Date.now() + STREAM_FINISH_BUDGET_MS;

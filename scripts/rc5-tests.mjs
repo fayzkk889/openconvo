@@ -408,6 +408,23 @@ await test('System prompt: date from the server clock; tool guidance only when t
   assert.match(unavailable, /could not check live sources/);
 });
 
+// Runs last: it leaves Google models in the route's rate-limit cooldown.
+await test('A rate-limited model family is skipped: fallback goes to a different provider', async () => {
+  installUpstream((body) => body.model.startsWith('google/')
+    ? new Response(JSON.stringify({ error: { message: 'Rate limited', metadata: { provider_name: 'Google AI Studio' } } }), { status: 429 })
+    : sse(contentFrames('Answer from another family.')));
+  const events = await drain(await chatPOST(chatRequest({
+    messages: [{ role: 'user', content: 'Explain recursion.' }],
+    model: 'google/gemma-4-31b-it:free',
+    availableModels: ['google/gemma-4-26b-a4b-it:free', 'nvidia/nemotron-3.5-super-vl:free'],
+  })));
+  const tried = modelBodies().map((b) => b.model);
+  assert.equal(tried.filter((m) => m.startsWith('google/')).length, 1, 'only one Google model tried');
+  assert.equal(events.find((e) => e.type === 'fallback').toModel.startsWith('google/'), false);
+  assert.equal(textOf(events), 'Answer from another family.');
+  assert.equal(events.at(-1).type, 'complete');
+});
+
 globalThis.fetch = realFetch;
 const failed = results.filter((r) => !r.ok).length;
 console.log(`RC-5 tests: ${results.length - failed} passed, ${failed} failed.`);

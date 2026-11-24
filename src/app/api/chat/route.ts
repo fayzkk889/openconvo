@@ -209,7 +209,7 @@ export async function POST(request: NextRequest) {
         let usedModel = model;
         const failedModels: string[] = [];
         const rateLimitedModels: string[] = [];
-        const providerRateLimits = new Map<string, number>();
+        const rateLimitedFamilies = new Set<string>();
         let retryAfterSeconds: number | undefined;
         let attemptsCount = 0;
 
@@ -228,7 +228,7 @@ export async function POST(request: NextRequest) {
             break;
           }
 
-          if (isModelCoolingDown(tryModel)) {
+          if (isModelCoolingDown(tryModel) || rateLimitedFamilies.has(modelFamily(tryModel))) {
             continue;
           }
 
@@ -449,11 +449,10 @@ export async function POST(request: NextRequest) {
               rateLimitedModels.push(tryModel);
               retryAfterSeconds = modelError.retryAfterSeconds || retryAfterSeconds;
               rememberModelCooldown(tryModel, modelError);
-              if (modelError.providerName) {
-                const hits = (providerRateLimits.get(modelError.providerName) || 0) + 1;
-                providerRateLimits.set(modelError.providerName, hits);
-                if (hits >= 2) break; // Don't pound the same provider
-              }
+              // Sibling models from the same family are usually served by the
+              // same throttled provider (e.g. both Gemmas via Google AI Studio):
+              // skip them and spend the next attempt on a different family.
+              rateLimitedFamilies.add(modelFamily(tryModel));
             } else if (modelError instanceof OpenRouterError && isOpenRouterAuthError(modelError)) {
               break; // Auth error won't be resolved by fallback
             }
@@ -461,7 +460,7 @@ export async function POST(request: NextRequest) {
             // If another candidate exists within deadline and attempt budget, notify client of fallback
             const nextCandidate = modelsToTry
               .slice(i + 1)
-              .find((m) => !isModelCoolingDown(m));
+              .find((m) => !isModelCoolingDown(m) && !rateLimitedFamilies.has(modelFamily(m)));
             if (nextCandidate && attemptsCount < MAX_MODEL_ATTEMPTS && overallDeadline - Date.now() > 5000) {
               const sanitizedReason = modelError instanceof OpenRouterError
                 ? formatOpenRouterError(modelError, tryModel)
@@ -892,4 +891,9 @@ function normalizeDocumentExcerpts(value: unknown): DocumentExcerpt[] | undefine
     ];
   });
   return excerpts.length > 0 ? excerpts : undefined;
+}
+
+/** "google/gemma-4-31b-it:free" -> "google". */
+function modelFamily(modelId: string): string {
+  return modelId.split('/')[0] || modelId;
 }
